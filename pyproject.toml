@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gradglass"
+version = "1.0.0"
+description = "Neural network transparency engine — inspect, compare, debug, and mutate your models locally."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+authors = [{name = "GradGlass Team", email = "hello@gradglass.dev"}]
+keywords = ["deep-learning", "neural-network", "debugging", "visualization", "pytorch", "tensorflow"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Debuggers",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "numpy>=1.21",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "websockets>=11.0",
+    "pydantic>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/gradglass/gradglass"
+Repository = "https://github.com/gradglass/gradglass"
+Documentation = "https://github.com/gradglass/gradglass/blob/main/docs/getting-started.md"
+"Bug Tracker" = "https://github.com/gradglass/gradglass/issues"
+
+[project.optional-dependencies]
+torch = ["torch>=1.12"]
+tensorflow = ["tensorflow>=2.10"]
+scipy = ["scipy>=1.7"]
+all = ["torch>=1.12", "tensorflow>=2.10", "scipy>=1.7"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "httpx", "ruff"]
+
+[project.scripts]
+gradglass = "gradglass.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gradglass*"]
+
+[tool.setuptools.package-data]
+gradglass = ["dashboard/dist/**/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.format]
+skip-magic-trailing-comma = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["gradglass"]
+omit = ["gradglass/dashboard/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

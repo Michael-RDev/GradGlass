@@ -1,0 +1,60 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# === Build artifacts ===
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# === Packaging / install ===
+.eggs/
+pip-wheel-metadata/
+*.pth
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+ENV/
+
+# === Testing & coverage ===
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# === Linting ===
+.ruff_cache/
+.mypy_cache/
+
+# === GradGlass runtime artifacts ===
+gg_artifacts/
+leakage_report.json
+
+# === Node / frontend ===
+gradglass/dashboard/node_modules/
+gradglass/dashboard/.vite/
+
+# === macOS ===
+.DS_Store
+.AppleDouble
+
+# === Editor ===
+.vscode/
+.idea/
+*.swp
+*~
+*.nvimlog
+.nvimlog
+
+# === Environment / secrets ===
+.env
+.env.*
+*.pem
+*.key

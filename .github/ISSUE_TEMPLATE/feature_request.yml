@@ -1,0 +1,69 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for GradGlass? We'd love to hear it. Fill in the form below.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem are you trying to solve, or what's currently missing?
+      placeholder: "It's hard to compare gradient norms across multiple runs without..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like to happen. API sketches welcome.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you tried working around this? What other approaches exist?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of GradGlass does this relate to?
+      options:
+        - Capture (hooks / data collection)
+        - Analysis / built-in tests
+        - Dashboard (React UI)
+        - CLI
+        - Server / REST API
+        - Leakage detection
+        - Diff / checkpoint comparison
+        - scikit-learn / XGBoost / LightGBM integration
+        - Documentation
+        - CI / developer tooling
+        - Other
+      multiple: true
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority (your view)
+      options:
+        - "Nice to have"
+        - "Would unblock my work"
+        - "Critical for adoption"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Links, papers, screenshots, or related issues.

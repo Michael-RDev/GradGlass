@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 60" width="300" height="60">
+  <!-- Lucide Microscope icon, scaled 2× from 24×24 native, placed at (3, 6) -->
+  <g transform="translate(3, 6) scale(2)" fill="none" stroke="#6366f1" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 18h8"/>
+    <path d="M3 22h18"/>
+    <path d="M14 22a7 7 0 1 0 0-14h-1"/>
+    <path d="M9 14h2"/>
+    <path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/>
+    <path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="62" y="33" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#0f172a" letter-spacing="-0.4">GradGlass</text>
+  <!-- Tagline -->
+  <text x="63" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="8.5" font-weight="400" fill="#64748b" letter-spacing="1.8">ML TRANSPARENCY ENGINE</text>
+</svg>

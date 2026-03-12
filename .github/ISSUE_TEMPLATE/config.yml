@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/your-org/gradglass/tree/main/docs
+    about: Read the docs before opening an issue — your question may already be answered.
