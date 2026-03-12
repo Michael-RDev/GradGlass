@@ -16,8 +16,8 @@ export default function Overview() {
     }
   }, [runId, setActiveRun]);
 
-  const textColor = theme === 'dark' ? '#94a3b8' : '#64748b';
-  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
+  const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
   const steps = metrics.map(m => m.step);
   const currentStep = steps.length > 0 ? Math.max(...steps) : 0;
@@ -54,8 +54,8 @@ export default function Overview() {
     ...commonChartOptions,
     legend: { data: ['Train Loss', 'Val Loss'], textStyle: { color: textColor }, top: 0, right: 0 },
     series: [
-      { name: 'Train Loss', type: 'line', data: trainLoss, showSymbol: false, smooth: true, itemStyle: { color: '#3b82f6' } }, // Blue: Training
-      ...(valLoss.length > 0 ? [{ name: 'Val Loss', type: 'line', data: valLoss, showSymbol: false, smooth: true, itemStyle: { color: '#10b981' } }] : []) // Green: Eval
+      { name: 'Train Loss', type: 'line', data: trainLoss, showSymbol: false, smooth: true, itemStyle: { color: '#FDA481' } }, // Accuracy/Positive: Accent Orange
+      ...(valLoss.length > 0 ? [{ name: 'Val Loss', type: 'line', data: valLoss, showSymbol: false, smooth: true, itemStyle: { color: '#B4182D' } }] : []) // Warnings/Drift: Primary Red
     ],
   };
 
@@ -63,7 +63,7 @@ export default function Overview() {
     ...commonChartOptions,
     yAxis: { ...commonChartOptions.yAxis, name: 'Tokens/sec' },
     series: [
-      { name: 'Throughput', type: 'line', data: throughput, showSymbol: false, smooth: true, itemStyle: { color: '#8b5cf6' }, areaStyle: { opacity: 0.1, color: '#8b5cf6' } }
+      { name: 'Throughput', type: 'line', data: throughput, showSymbol: false, smooth: true, itemStyle: { color: '#37415C' }, areaStyle: { opacity: 0.1, color: '#37415C' } }
     ]
   };
 
@@ -71,7 +71,7 @@ export default function Overview() {
     ...commonChartOptions,
     yAxis: { type: 'log', name: 'Learning Rate', splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }, axisLabel: { color: textColor } },
     series: [
-      { name: 'LR', type: 'line', data: lrData, showSymbol: false, step: 'end', itemStyle: { color: '#14b8a6' } }
+      { name: 'LR', type: 'line', data: lrData, showSymbol: false, step: 'end', itemStyle: { color: '#FDA481' } }
     ]
   };
 
@@ -79,9 +79,9 @@ export default function Overview() {
     ...commonChartOptions,
     legend: { textStyle: { color: textColor }, top: 0, right: 0 },
     series: [
-      ...(perplexity.length ? [{ name: 'Perplexity', type: 'line', data: perplexity, showSymbol: false, smooth: true, itemStyle: { color: '#f43f5e' } }] : []),
-      ...(reward.length ? [{ name: 'Reward', type: 'line', data: reward, showSymbol: false, smooth: true, itemStyle: { color: '#eab308' } }] : []),
-      ...(klDiv.length ? [{ name: 'KL Div', type: 'line', data: klDiv, showSymbol: false, smooth: true, itemStyle: { color: '#06b6d4' } }] : []),
+      ...(perplexity.length ? [{ name: 'Perplexity', type: 'line', data: perplexity, showSymbol: false, smooth: true, itemStyle: { color: '#B4182D' } }] : []),
+      ...(reward.length ? [{ name: 'Reward', type: 'line', data: reward, showSymbol: false, smooth: true, itemStyle: { color: '#FDA481' } }] : []),
+      ...(klDiv.length ? [{ name: 'KL Div', type: 'line', data: klDiv, showSymbol: false, smooth: true, itemStyle: { color: '#37415C' } }] : []),
     ]
   };
 
@@ -90,7 +90,7 @@ export default function Overview() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Global Experiment Overview</h1>
+        <h1 className="h2 text-theme-text-primary">Global Experiment Overview</h1>
         <div className={`flex items-center gap-2 px-4 py-2 rounded-full border bg-white dark:bg-slate-900 shadow-sm ${hasAlerts ? 'border-amber-300 dark:border-amber-500/30' : 'border-emerald-300 dark:border-emerald-500/30'}`}>
           <StatusIcon className={`w-5 h-5 ${statusColor}`} />
           <span className={`text-sm font-bold tracking-wide ${statusColor}`}>
@@ -173,14 +173,14 @@ export default function Overview() {
       {/* Main Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card h-[380px] flex flex-col">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Training Performance (Loss)</h3>
+          <h3 className="h3 text-theme-text-primary mb-2">Training Performance (Loss)</h3>
           <div className="flex-1 min-h-0">
             <ReactECharts option={lossOptions} style={{ height: '100%', width: '100%' }} />
           </div>
         </div>
 
         <div className="card h-[380px] flex flex-col">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Learning Rate Schedule</h3>
+          <h3 className="h3 text-theme-text-primary mb-2">Learning Rate Schedule</h3>
           <div className="flex-1 min-h-0">
             <ReactECharts option={lrOptions} style={{ height: '100%', width: '100%' }} />
           </div>
@@ -189,7 +189,7 @@ export default function Overview() {
         {(advancedOptions.series.length > 0 || throughput.length > 0) && (
           <>
             <div className="card h-[380px] flex flex-col">
-              <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Advanced Metrics (LLM/RL)</h3>
+              <h3 className="h3 text-theme-text-primary mb-2">Advanced Metrics (LLM/RL)</h3>
               <div className="flex-1 min-h-0 relative">
                 {advancedOptions.series.length > 0 ? (
                   <ReactECharts option={advancedOptions} style={{ height: '100%', width: '100%' }} />
@@ -200,7 +200,7 @@ export default function Overview() {
             </div>
 
             <div className="card h-[380px] flex flex-col">
-              <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">System Throughput</h3>
+              <h3 className="h3 text-theme-text-primary mb-2">System Throughput</h3>
               <div className="flex-1 min-h-0 relative">
                  {throughput.length > 0 ? (
                    <ReactECharts option={performanceOptions} style={{ height: '100%', width: '100%' }} />

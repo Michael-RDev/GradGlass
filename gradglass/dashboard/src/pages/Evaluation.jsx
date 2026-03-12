@@ -22,8 +22,8 @@ export default function Evaluation() {
     }
   }, [runId]);
 
-  const textColor = theme === 'dark' ? '#94a3b8' : '#64748b';
-  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
+  const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
   const latestEval = evalData.length > 0 ? evalData[evalData.length - 1] : null;
   const isClass = latestEval?.is_classification;
@@ -42,8 +42,8 @@ export default function Evaluation() {
         xAxis: { type: 'category', data: steps, axisLabel: { color: textColor } },
         yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }, axisLabel: { color: textColor } },
         series: [
-          { name: 'Accuracy (%)', type: 'line', data: acc, smooth: true, itemStyle: { color: '#3b82f6' } },
-          { name: 'Macro F1 (%)', type: 'line', data: f1, smooth: true, itemStyle: { color: '#10b981' } }
+          { name: 'Accuracy (%)', type: 'line', data: acc, smooth: true, itemStyle: { color: '#FDA481' } },
+          { name: 'Macro F1 (%)', type: 'line', data: f1, smooth: true, itemStyle: { color: '#B4182D' } }
         ]
       };
     } else {
@@ -58,8 +58,8 @@ export default function Evaluation() {
         xAxis: { type: 'category', data: steps, axisLabel: { color: textColor } },
         yAxis: { type: 'value', splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }, axisLabel: { color: textColor } },
         series: [
-          { name: 'MSE', type: 'line', data: mse, smooth: true, itemStyle: { color: '#3b82f6' } },
-          { name: 'MAE', type: 'line', data: mae, smooth: true, itemStyle: { color: '#f43f5e' } }
+          { name: 'MSE', type: 'line', data: mse, smooth: true, itemStyle: { color: '#B4182D' } },
+          { name: 'MAE', type: 'line', data: mae, smooth: true, itemStyle: { color: '#FDA481' } }
         ]
       };
     }
@@ -83,8 +83,8 @@ export default function Evaluation() {
       grid: { left: 60, right: 20, bottom: 40, top: 10 },
       xAxis: { type: 'category', data: classes, name: 'Predicted', nameLocation: 'middle', nameGap: 25, splitArea: { show: true }, axisLabel: { color: textColor } },
       yAxis: { type: 'category', data: classes, name: 'Actual', nameLocation: 'middle', nameGap: 40, splitArea: { show: true }, axisLabel: { color: textColor } },
-      visualMap: { min: 0, max: maxVal, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%', textStyle: { color: textColor }, inRange: { color: theme === 'dark' ? ['#0f172a', '#6366f1'] : ['#f8fafc', '#4f46e5'] } },
-      series: [{ name: 'Confusion Matrix', type: 'heatmap', data: data, label: { show: true, color: theme === 'dark' ? '#fff' : '#000' }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } } }]
+      visualMap: { min: 0, max: maxVal, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%', textStyle: { color: textColor }, inRange: { color: theme === 'dark' ? ['#242E49', '#FDA481'] : ['#F0F2F7', '#FDA481'] } },
+      series: [{ name: 'Confusion Matrix', type: 'heatmap', data: data, label: { show: true, color: theme === 'dark' ? '#181A2F' : '#181A2F' }, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } } }]
     };
   }, [latestEval, theme, textColor]);
 
@@ -97,8 +97,8 @@ export default function Evaluation() {
       xAxis: { type: 'category', data: ['MMLU', 'GSM8K', 'HellaSwag', 'TruthfulQA', 'HumanEval'], axisLabel: { color: textColor } },
       yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }, axisLabel: { color: textColor } },
       series: [
-        { name: '0-shot', type: 'bar', data: [45.2, 32.1, 71.5, 40.8, 25.0], itemStyle: { color: '#64748b' } },
-        { name: '5-shot', type: 'bar', data: [51.4, 48.7, 78.2, 45.3, 33.5], itemStyle: { color: '#3b82f6' } }
+        { name: '0-shot', type: 'bar', data: [45.2, 32.1, 71.5, 40.8, 25.0], itemStyle: { color: '#37415C' } },
+        { name: '5-shot', type: 'bar', data: [51.4, 48.7, 78.2, 45.3, 33.5], itemStyle: { color: '#FDA481' } }
       ]
     };
   }, [textColor, gridColor]);
@@ -112,8 +112,8 @@ export default function Evaluation() {
       xAxis: { type: 'category', data: ['mAP', 'IoU', 'Top-1 Acc', 'Top-5 Acc'], axisLabel: { color: textColor } },
       yAxis: { type: 'value', min: 0, max: 100, splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }, axisLabel: { color: textColor } },
       series: [
-        { name: 'Baseline', type: 'bar', data: [38.5, 52.1, 74.2, 91.5], itemStyle: { color: '#64748b' } },
-        { name: 'Current Run', type: 'bar', data: [42.1, 55.4, 78.9, 94.2], itemStyle: { color: '#10b981' } }
+        { name: 'Baseline', type: 'bar', data: [38.5, 52.1, 74.2, 91.5], itemStyle: { color: '#37415C' } },
+        { name: 'Current Run', type: 'bar', data: [42.1, 55.4, 78.9, 94.2], itemStyle: { color: '#FDA481' } }
       ]
     };
   }, [textColor, gridColor]);
@@ -124,7 +124,7 @@ export default function Evaluation() {
     <div className="space-y-6 flex flex-col h-[calc(100vh-8rem)]">
       <div className="flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Evaluation & Benchmarks</h1>
+          <h1 className="h2 text-theme-text-primary">Evaluation & Benchmarks</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Multi-modal quality analysis and public benchmark suites.</p>
         </div>
       </div>
@@ -201,7 +201,7 @@ export default function Evaluation() {
 
                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                    <div className="card h-[400px] flex flex-col">
-                      <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Performance Trend</h3>
+                      <h3 className="h3 text-theme-text-primary mb-2">Performance Trend</h3>
                       <div className="flex-1 min-h-0">
                         {trendOptions && <ReactECharts option={trendOptions} style={{ height: '100%', width: '100%' }} />}
                       </div>
@@ -209,7 +209,7 @@ export default function Evaluation() {
 
                    {isClass && cmOptions && (
                      <div className="card h-[400px] flex flex-col">
-                        <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Confusion Matrix (Latest)</h3>
+                        <h3 className="h3 text-theme-text-primary mb-2">Confusion Matrix (Latest)</h3>
                         <div className="flex-1 min-h-0">
                           <ReactECharts option={cmOptions} style={{ height: '100%', width: '100%' }} />
                         </div>
@@ -225,7 +225,7 @@ export default function Evaluation() {
            <div className="space-y-6">
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 card h-[400px] flex flex-col">
-                   <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                   <h3 className="h3 text-theme-text-primary mb-2 flex items-center gap-2">
                      <BookOpen className="w-5 h-5 text-indigo-500" /> Language Model Benchmarks
                    </h3>
                    <div className="flex-1 min-h-0">
@@ -233,7 +233,7 @@ export default function Evaluation() {
                    </div>
                 </div>
                 <div className="card flex flex-col">
-                   <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-4">Benchmark Suites</h3>
+                   <h3 className="h3 text-theme-text-primary mb-4">Benchmark Suites</h3>
                    <div className="space-y-4">
                       <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800">
                          <div className="flex items-center justify-between mb-1">
@@ -259,7 +259,7 @@ export default function Evaluation() {
            <div className="space-y-6">
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 card h-[400px] flex flex-col">
-                   <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                   <h3 className="h3 text-theme-text-primary mb-2 flex items-center gap-2">
                      <ImageIcon className="w-5 h-5 text-indigo-500" /> Vision Transformer Benchmarks
                    </h3>
                    <div className="flex-1 min-h-0">
@@ -267,7 +267,7 @@ export default function Evaluation() {
                    </div>
                 </div>
                 <div className="card flex flex-col">
-                   <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-4">Benchmark Suites</h3>
+                   <h3 className="h3 text-theme-text-primary mb-4">Benchmark Suites</h3>
                    <div className="space-y-4">
                       <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800">
                          <div className="flex items-center justify-between mb-1">

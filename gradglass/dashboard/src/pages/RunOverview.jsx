@@ -89,29 +89,29 @@ export default function RunOverview() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">{run.name}</h1>
+          <h1 className="h2 text-theme-text-primary">{run.name}</h1>
           <div className="flex items-center gap-3 mt-1">
             <StatusBadge status={run.status} />
             {run.framework && (
-              <span className="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded-md font-mono">
+              <span className="text-xs text-theme-text-secondary bg-theme-bg border border-theme-border px-2 py-0.5 rounded-md font-mono">
                 {run.framework}
               </span>
             )}
-            <span className="text-xs text-slate-500">{run.start_time}</span>
+            <span className="text-xs text-theme-text-secondary">{run.start_time}</span>
           </div>
         </div>
 
         <div className="flex gap-2">
           <Link to={`/run/${encodeURIComponent(runId)}/diff`}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-glass-600/20 text-glass-300 text-sm hover:bg-glass-600/30 transition-colors">
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-theme-primary/10 text-theme-primary text-sm hover:bg-theme-primary/20 transition-colors">
             <GitCompare className="w-4 h-4" /> Diff Viewer
           </Link>
           <Link to={`/run/${encodeURIComponent(runId)}/gradients`}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition-colors">
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-theme-surface-hover border border-theme-border text-theme-text-primary text-sm hover:bg-theme-bg transition-colors">
             <Activity className="w-4 h-4" /> Gradients
           </Link>
           <Link to={`/run/${encodeURIComponent(runId)}/leakage`}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition-colors">
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-theme-surface-hover border border-theme-border text-theme-text-primary text-sm hover:bg-theme-bg transition-colors">
             <Shield className="w-4 h-4" /> Leakage
           </Link>
         </div>
@@ -139,7 +139,7 @@ export default function RunOverview() {
           {hasLoss && (
             <div className="card">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-medium text-slate-400">Loss <span className="text-xs text-slate-600">per {xLabel}</span></h3>
+                <h3 className="text-sm font-medium text-theme-text-primary">Loss <span className="text-xs text-theme-text-secondary">per {xLabel}</span></h3>
                 {lossTrend && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${lossTrend.improving ? 'text-emerald-400 bg-emerald-400/10' : 'text-red-400 bg-red-400/10'}`}>
                     {lossTrend.improving ? '↓' : '↑'} {Math.abs(lossTrend.pct)}% ({lossTrend.first} → {lossTrend.last})
@@ -164,7 +164,7 @@ export default function RunOverview() {
 
           {hasAcc && (
             <div className="card">
-              <h3 className="text-sm font-medium text-slate-400 mb-4">Accuracy <span className="text-xs text-slate-600">per {xLabel}</span></h3>
+              <h3 className="text-sm font-medium text-theme-text-primary mb-4">Accuracy <span className="text-xs text-theme-text-secondary">per {xLabel}</span></h3>
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={plotData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -184,7 +184,7 @@ export default function RunOverview() {
 
           {hasLR && (
             <div className="card">
-              <h3 className="text-sm font-medium text-slate-400 mb-4">Learning Rate <span className="text-xs text-slate-600">per {xLabel}</span></h3>
+              <h3 className="text-sm font-medium text-theme-text-primary mb-4">Learning Rate <span className="text-xs text-theme-text-secondary">per {xLabel}</span></h3>
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={plotData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -206,13 +206,13 @@ export default function RunOverview() {
       {/* Checkpoint timeline */}
       {checkpoints.length > 0 && (
         <div className="card">
-          <h3 className="text-sm font-medium text-slate-400 mb-4">Checkpoint Timeline</h3>
+          <h3 className="text-sm font-medium text-theme-text-primary mb-4">Checkpoint Timeline</h3>
           <div className="flex gap-2 flex-wrap">
             {checkpoints.map((ckpt, i) => (
-              <div key={i} className="px-3 py-2 bg-slate-800 rounded-lg text-xs">
-                <div className="font-mono text-slate-300">Step {ckpt.step?.toLocaleString()}</div>
-                {ckpt.tag && <div className="text-glass-400 mt-0.5">{ckpt.tag}</div>}
-                <div className="text-slate-500 mt-0.5">{ckpt.size_mb || '?'} MB</div>
+              <div key={i} className="px-3 py-2 bg-theme-surface-hover border border-theme-border rounded-lg text-xs">
+                <div className="font-mono text-theme-text-primary">Step {ckpt.step?.toLocaleString()}</div>
+                {ckpt.tag && <div className="text-theme-primary mt-0.5">{ckpt.tag}</div>}
+                <div className="text-theme-text-secondary mt-0.5">{ckpt.size_mb || '?'} MB</div>
               </div>
             ))}
           </div>

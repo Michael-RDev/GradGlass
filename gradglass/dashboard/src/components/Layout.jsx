@@ -1,17 +1,39 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Microscope, LayoutDashboard, Activity, BarChart2, Cpu, Database, GitCompare, AlertTriangle, Sun, Moon, Server, Lightbulb } from 'lucide-react';
+import { Microscope, LayoutDashboard, Activity, BarChart2, Cpu, Database, GitCompare, AlertTriangle, Sun, Moon, Server, Lightbulb, User, Bell } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 
-const RUN_NAV_ITEMS = [
-  { path: '/overview', label: 'Overview', icon: LayoutDashboard },
-  { path: '/training', label: 'Training', icon: Activity },
-  { path: '/evaluation', label: 'Evaluation', icon: BarChart2 },
-  { path: '/internals', label: 'Model Internals', icon: Cpu },
-  { path: '/data', label: 'Data', icon: Database },
-  { path: '/infrastructure', label: 'Infrastructure', icon: Server },
-  { path: '/interpretability', label: 'Interpretability', icon: Lightbulb },
-  { path: '/compare', label: 'Compare', icon: GitCompare },
-  { path: '/alerts', label: 'Alerts', icon: AlertTriangle },
+const MAIN_NAV = [
+  { path: '/dashboard', label: 'Dashboard' },
+  { path: '/experiments', label: 'Experiments' },
+  { path: '/models', label: 'Models' },
+  { path: '/datasets', label: 'Datasets' },
+];
+
+const SIDEBAR_SECTIONS = [
+  {
+    title: 'Monitor',
+    items: [
+      { path: '/overview', label: 'Dashboard', icon: LayoutDashboard },
+      { path: '/training', label: 'Metrics', icon: Activity },
+      { path: '/infrastructure', label: 'Infrastructure', icon: Server },
+    ]
+  },
+  {
+    title: 'Analyze',
+    items: [
+      { path: '/evaluation', label: 'Evaluation', icon: BarChart2 },
+      { path: '/compare', label: 'Compare', icon: GitCompare },
+      { path: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    ]
+  },
+  {
+    title: 'Deep Dive',
+    items: [
+      { path: '/internals', label: 'Visualizations', icon: Cpu },
+      { path: '/data', label: 'Data', icon: Database },
+      { path: '/interpretability', label: 'Interpretability', icon: Lightbulb },
+    ]
+  }
 ];
 
 export default function Layout({ children }) {
@@ -23,106 +45,114 @@ export default function Layout({ children }) {
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 font-sans transition-colors duration-200">
-      {/* Sidebar Navigation */}
-      <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 flex flex-col shrink-0 transition-colors duration-200">
-        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-200 dark:border-slate-800 transition-colors duration-200">
-          <Link to="/" className="flex items-center gap-2 text-xl font-bold tracking-tight text-slate-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
-            <Microscope className="w-6 h-6 text-indigo-600 dark:text-indigo-500" />
-            <span>GradGlass</span>
+    <div className="flex flex-col h-screen h-[100dvh] overflow-hidden bg-theme-bg text-theme-text-primary transition-colors duration-250 ease-in-out">
+      
+      {/* Top Navigation */}
+      <header className="h-[64px] border-b border-theme-border bg-theme-surface flex items-center justify-between px-6 shrink-0 z-20">
+        
+        {/* Left: Logo */}
+        <div className="flex items-center gap-8">
+          <Link to="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-theme-primary flex items-center justify-center shadow-lg">
+               <Microscope className="w-5 h-5 text-[#181A2F]" />
+            </div>
+            <span className="text-xl font-bold tracking-tight text-theme-text-primary hidden sm:block">GradGlass</span>
           </Link>
-          <button 
-            onClick={toggleTheme} 
-            className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-        </div>
 
-        <div className="flex-1 overflow-y-auto py-4">
-          <div className="px-4 mb-2">
-            <p className="px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              {runId ? 'Run Context' : 'Global Context'}
-            </p>
-          </div>
-
-          <nav className="space-y-1 px-3">
-            {!isRunPage && (
-              <Link
-                to="/"
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                  location.pathname === '/' 
-                    ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400' 
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <Database className="w-4 h-4" />
-                All Runs
-              </Link>
-            )}
-
-            {isRunPage && RUN_NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const fullPath = `/run/${runId}${item.path}`;
-              const active = location.pathname.startsWith(fullPath);
-              return (
-                <Link
-                  key={item.path}
-                  to={fullPath}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                    active 
-                      ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 shadow-sm shadow-indigo-500/5' 
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
+          {/* Center: Main Nav (Placeholder Links) */}
+          <nav className="hidden md:flex items-center gap-1">
+            {MAIN_NAV.map(nav => (
+               <button key={nav.path} className="px-4 py-2 rounded-lg text-sm font-medium text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-surface-hover transition-colors">
+                 {nav.label}
+               </button>
+            ))}
           </nav>
         </div>
 
-        {runId && (
-          <div className="p-4 border-t border-slate-200 dark:border-slate-800 transition-colors duration-200">
-            <div className="px-3 py-2 rounded-md bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 transition-colors duration-200">
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Active Run</p>
-              <p className="text-sm font-mono text-slate-900 dark:text-slate-200 truncate" title={decodeURIComponent(runId)}>
-                {decodeURIComponent(runId)}
-              </p>
+        {/* Right: Actions */}
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={toggleTheme} 
+            className="p-2 rounded-full bg-theme-surface-hover text-theme-text-secondary hover:text-theme-primary transition-all duration-250 hover:-translate-y-[2px]"
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+          
+          <button className="p-2 rounded-full bg-theme-surface-hover text-theme-text-secondary hover:text-theme-primary transition-all duration-250 hover:-translate-y-[2px]">
+             <Bell className="w-5 h-5" />
+          </button>
+
+          <button className="w-9 h-9 rounded-full bg-theme-accent border border-theme-border flex items-center justify-center text-white font-medium hover:ring-2 hover:ring-theme-primary transition-all cursor-pointer">
+             <User className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <aside className="w-[260px] border-r border-theme-border bg-theme-bg dark:bg-[#181A2F] flex flex-col shrink-0 z-10 transition-colors duration-250">
+          <div className="flex-1 overflow-y-auto py-6 px-4 custom-scrollbar">
+            
+            {runId ? (
+              <div className="mb-6 p-4 rounded-xl bg-theme-surface border border-theme-border shadow-sm">
+                <p className="text-[12px] font-semibold text-theme-text-muted uppercase tracking-wider mb-1">Active Run</p>
+                <p className="text-sm font-mono text-theme-text-primary truncate" title={decodeURIComponent(runId)}>
+                  {decodeURIComponent(runId)}
+                </p>
+              </div>
+            ) : (
+              <div className="mb-6 px-2">
+                 <p className="text-[12px] font-semibold text-theme-text-muted uppercase tracking-wider">Global Overview</p>
+              </div>
+            )}
+
+            <div className="space-y-8">
+              {SIDEBAR_SECTIONS.map((section, sIdx) => (
+                 <div key={sIdx}>
+                   <h4 className="px-3 text-[12px] font-semibold text-theme-text-muted uppercase tracking-wider mb-2">
+                     {section.title}
+                   </h4>
+                   <nav className="space-y-1">
+                     {section.items.map((item) => {
+                        const Icon = item.icon;
+                        const fullPath = runId ? `/run/${runId}${item.path}` : '/';
+                        // Keep simple active state matching for now
+                        const active = location.pathname.includes(item.path);
+                        
+                        return (
+                          <Link
+                            key={item.path}
+                            to={fullPath}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] font-medium transition-all duration-250 ${
+                              active 
+                                ? 'bg-theme-surface border border-theme-border text-theme-primary shadow-sm' 
+                                : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-surface-hover'
+                            }`}
+                          >
+                            <Icon className={`w-4 h-4 ${active ? 'text-theme-primary' : 'text-theme-text-muted'}`} />
+                            {item.label}
+                          </Link>
+                        );
+                     })}
+                   </nav>
+                 </div>
+              ))}
             </div>
           </div>
-        )}
-      </aside>
+        </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 dark:bg-slate-950 transition-colors duration-200">
-        <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/30 flex items-center px-8 shrink-0 transition-colors duration-200">
-          <div className="flex-1 flex gap-2 text-sm text-slate-500 dark:text-slate-400">
-            {runId && (
-               <>
-                 <span>Run</span>
-                 <span className="text-slate-400 dark:text-slate-600">/</span>
-                 <span className="text-slate-800 dark:text-slate-300 font-mono">{decodeURIComponent(runId)}</span>
-                 {location.pathname.split('/').slice(3).map(part => (
-                   part && (
-                     <span key={part} className="flex gap-2">
-                       <span className="text-slate-400 dark:text-slate-600">/</span>
-                       <span className="capitalize">{part}</span>
-                     </span>
-                   )
-                 ))}
-               </>
-            )}
-            {!runId && <span>Dashboard</span>}
+        {/* Main Content Area */}
+        <main className="flex-1 flex flex-col h-full overflow-hidden bg-theme-bg relative">
+          {/* subtle background gradient overlay */}
+          <div className="absolute inset-0 bg-theme-bg opacity-50 pointer-events-none" />
+          
+          <div className="flex-1 overflow-auto p-8 relative z-10 custom-scrollbar">
+            <div className="max-w-[1600px] mx-auto pb-12">
+              {children}
+            </div>
           </div>
-        </header>
-        <div className="flex-1 overflow-auto p-8">
-          <div className="max-w-[1600px] mx-auto pb-12">
-            {children}
-          </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

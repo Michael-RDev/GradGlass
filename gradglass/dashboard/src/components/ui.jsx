@@ -29,9 +29,9 @@ export function StatusBadge({ status }) {
 export function MetricValue({ label, value, unit = '', className = '' }) {
   return (
     <div className={`flex flex-col ${className}`}>
-      <span className="text-xs text-slate-500 uppercase tracking-wider">{label}</span>
-      <span className="text-lg font-semibold font-mono">
-        {value}{unit && <span className="text-xs text-slate-500 ml-1">{unit}</span>}
+      <span className="text-xs text-theme-text-secondary uppercase tracking-wider">{label}</span>
+      <span className="text-lg font-semibold font-mono text-theme-text-primary">
+        {value}{unit && <span className="text-xs text-theme-text-secondary ml-1">{unit}</span>}
       </span>
     </div>
   )
@@ -57,9 +57,9 @@ export function ErrorMessage({ message }) {
 export function EmptyState({ icon: Icon, title, description }) {
   return (
     <div className="card text-center py-16">
-      {Icon && <Icon className="w-12 h-12 text-slate-600 mx-auto mb-4" />}
-      <h3 className="text-lg font-medium text-slate-400">{title}</h3>
-      {description && <p className="text-sm text-slate-500 mt-2">{description}</p>}
+      {Icon && <Icon className="w-12 h-12 text-theme-text-muted mx-auto mb-4" />}
+      <h3 className="text-lg font-medium text-theme-text-secondary">{title}</h3>
+      {description && <p className="text-sm text-theme-text-muted mt-2">{description}</p>}
     </div>
   )
 }

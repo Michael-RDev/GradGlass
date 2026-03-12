@@ -7,8 +7,8 @@ export default function Interpretability() {
   const [activeTab, setActiveTab] = useState('attention');
   const { theme } = useTheme();
 
-  const textColor = theme === 'dark' ? '#94a3b8' : '#64748b';
-  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
+  const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
   // Mock data for Attention Map
   const attentionOptions = useMemo(() => {
@@ -30,7 +30,7 @@ export default function Interpretability() {
       grid: { left: 60, right: 30, bottom: 60, top: 20 },
       xAxis: { type: 'category', data: tokens, axisLabel: { interval: 0, rotate: 45, color: textColor } },
       yAxis: { type: 'category', data: tokens, axisLabel: { color: textColor } },
-      visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%', textStyle: { color: textColor }, inRange: { color: theme === 'dark' ? ['#0f172a', '#fbbf24', '#ef4444'] : ['#f8fafc', '#fcd34d', '#dc2626'] } },
+      visualMap: { min: 0, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%', textStyle: { color: textColor }, inRange: { color: theme === 'dark' ? ['#242E49', '#FDA481', '#B4182D'] : ['#F0F2F7', '#FDA481', '#B4182D'] } },
       series: [{ name: 'Attention Weight', type: 'heatmap', data, emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } } }]
     };
   }, [theme, textColor]);
@@ -49,7 +49,7 @@ export default function Interpretability() {
           data: [0.85, 0.62, 0.45, -0.32, -0.55],
           itemStyle: {
             color: (params) => {
-              return params.value > 0 ? '#10b981' : '#ef4444'; // Green for positive, Red for negative
+              return params.value > 0 ? '#FDA481' : '#B4182D'; // Orange for positive, Red for negative
             }
           }
         }
@@ -67,7 +67,7 @@ export default function Interpretability() {
     <div className="space-y-6 flex flex-col h-[calc(100vh-8rem)]">
       <div className="flex items-center justify-between shrink-0">
         <div>
-           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Interpretability & Debugging</h1>
+           <h1 className="h2 text-theme-text-primary">Interpretability & Debugging</h1>
            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Peek inside the black box with SHAP, attention maps, and failure analysis.</p>
         </div>
       </div>
@@ -75,19 +75,19 @@ export default function Interpretability() {
       <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
          <button 
            onClick={() => setActiveTab('attention')}
-           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'attention' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
+           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'attention' ? 'border-theme-primary text-theme-primary' : 'border-transparent text-theme-text-secondary hover:text-theme-text-primary'}`}
          >
            <BrainCircuit className="w-4 h-4" /> Attention Maps
          </button>
          <button 
            onClick={() => setActiveTab('shap')}
-           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'shap' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
+           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'shap' ? 'border-theme-primary text-theme-primary' : 'border-transparent text-theme-text-secondary hover:text-theme-text-primary'}`}
          >
            <ScanSearch className="w-4 h-4" /> Feature Attribution
          </button>
          <button 
            onClick={() => setActiveTab('failures')}
-           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'failures' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'}`}
+           className={`px-4 py-3 text-sm font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'failures' ? 'border-theme-primary text-theme-primary' : 'border-transparent text-theme-text-secondary hover:text-theme-text-primary'}`}
          >
            <AlertCircle className="w-4 h-4" /> Worst Predictions
          </button>
@@ -97,13 +97,13 @@ export default function Interpretability() {
         {activeTab === 'attention' && (
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full min-h-[500px]">
              <div className="lg:col-span-2 card flex flex-col">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Self-Attention Heatmap (Head 4, Layer 12)</h3>
+                <h3 className="h3 text-theme-text-primary mb-2">Self-Attention Heatmap (Head 4, Layer 12)</h3>
                 <div className="flex-1 min-h-[400px]">
                   <ReactECharts option={attentionOptions} style={{ height: '100%', width: '100%' }} />
                 </div>
              </div>
              <div className="card flex flex-col space-y-4">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white">Head Controls</h3>
+                <h3 className="h3 text-theme-text-primary">Head Controls</h3>
                 <div>
                    <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Select Layer</label>
                    <select className="w-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -130,7 +130,7 @@ export default function Interpretability() {
 
         {activeTab === 'shap' && (
            <div className="card min-h-[500px] flex flex-col">
-             <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Feature Importance (Global SHAP)</h3>
+             <h3 className="h3 text-theme-text-primary mb-2">Feature Importance (Global SHAP)</h3>
              <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">Aggregated Shapley values across the validation set. Shows which tokens or pixels influence the model's decisions the most.</p>
              <div className="flex-1 min-h-[400px]">
                <ReactECharts option={attributionOptions} style={{ height: '100%', width: '100%' }} />
@@ -140,7 +140,7 @@ export default function Interpretability() {
 
         {activeTab === 'failures' && (
            <div className="card min-h-[500px]">
-             <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-6">Highest Loss Interventions</h3>
+             <h3 className="h3 text-theme-text-primary mb-6">Highest Loss Interventions</h3>
              <div className="overflow-x-auto">
                <table className="w-full text-left text-sm text-slate-600 dark:text-slate-300">
                  <thead className="bg-slate-100 dark:bg-slate-800/50 text-slate-700 dark:text-slate-200">

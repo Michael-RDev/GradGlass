@@ -27,8 +27,8 @@ export default function ModelInternals() {
     }
   }, [runId]);
 
-  const textColor = theme === 'dark' ? '#94a3b8' : '#64748b';
-  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
+  const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
   const { latestStep, numLayers, flowOptions, layersList } = useMemo(() => {
     if (!gradients || !gradients.summaries || gradients.summaries.length === 0) {
@@ -58,9 +58,9 @@ export default function ModelInternals() {
           itemStyle: { 
             color: (params) => {
               const val = params.value;
-              if (val < 1e-5) return '#3b82f6'; // vanishing (blue)
-              if (val > 10) return '#ef4444'; // exploding (red)
-              return '#10b981'; // healthy (green)
+              if (val < 1e-5) return '#37415C'; // vanishing: Muted Slate
+              if (val > 10) return '#B4182D'; // exploding: Primary Red
+              return '#FDA481'; // healthy: Accent Orange
             }
           } 
         }
@@ -77,7 +77,7 @@ export default function ModelInternals() {
     <div className="space-y-6 flex flex-col h-[calc(100vh-8rem)]">
       <div className="flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Model Architecture Explorer</h1>
+          <h1 className="h2 text-theme-text-primary">Model Architecture Explorer</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Layer-by-layer observability, FLOPs tracking, and gradient stability analysis.</p>
         </div>
         <div className="flex gap-4">
@@ -145,7 +145,7 @@ export default function ModelInternals() {
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6">
            <div className="card">
              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white">Global Gradient Stability</h3>
+                <h3 className="h3 text-theme-text-primary">Global Gradient Stability</h3>
                 <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">Step {latestStep}</span>
              </div>
              <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">Real-time L2 norm extraction spanning the network depth. Identify shattering, exploding (red), or vanishing (blue) phenomena immediately.</p>
@@ -155,8 +155,8 @@ export default function ModelInternals() {
            </div>
 
            <div className="card">
-              <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                <Snowflake className="w-5 h-5 text-blue-500" />
+              <h3 className="h3 text-theme-text-primary mb-4 flex items-center gap-2">
+                <Snowflake className="w-5 h-5 text-theme-accent" />
                 Layer Ablation / Freeze Tools
               </h3>
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 max-w-2xl">

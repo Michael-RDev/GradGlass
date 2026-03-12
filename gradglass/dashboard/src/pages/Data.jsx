@@ -21,8 +21,8 @@ export default function Data() {
     }
   }, [runId]);
 
-  const textColor = theme === 'dark' ? '#94a3b8' : '#64748b';
-  const gridColor = theme === 'dark' ? '#1e293b' : '#e2e8f0';
+  const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
+  const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
   // Mock data for Modality Breakdown
   const modalityOptions = useMemo(() => {
@@ -35,15 +35,15 @@ export default function Data() {
           type: 'pie',
           radius: ['40%', '70%'],
           avoidLabelOverlap: false,
-          itemStyle: { borderRadius: 10, borderColor: theme === 'dark' ? '#0f172a' : '#fff', borderWidth: 2 },
+          itemStyle: { borderRadius: 10, borderColor: theme === 'dark' ? '#181A2F' : '#fff', borderWidth: 2 },
           label: { show: false, position: 'center' },
           emphasis: { label: { show: true, fontSize: 20, fontWeight: 'bold', color: textColor } },
           labelLine: { show: false },
           data: [
-            { value: 1048, name: 'Text', itemStyle: { color: '#3b82f6' } },
-            { value: 735, name: 'Images', itemStyle: { color: '#10b981' } },
-            { value: 580, name: 'Code', itemStyle: { color: '#8b5cf6' } },
-            { value: 300, name: 'Audio', itemStyle: { color: '#f59e0b' } },
+            { value: 1048, name: 'Text', itemStyle: { color: '#FDA481' } },
+            { value: 735, name: 'Images', itemStyle: { color: '#37415C' } },
+            { value: 580, name: 'Code', itemStyle: { color: '#54162B' } },
+            { value: 300, name: 'Audio', itemStyle: { color: '#B4182D' } },
           ]
         }
       ]
@@ -62,7 +62,7 @@ export default function Data() {
           name: 'Documents',
           type: 'bar',
           data: [120, 200, 150, 80, 70, 110],
-          itemStyle: { color: '#6366f1', borderRadius: [4, 4, 0, 0] }
+          itemStyle: { color: '#FDA481', borderRadius: [4, 4, 0, 0] }
         }
       ]
     };
@@ -82,7 +82,7 @@ export default function Data() {
     <div className="space-y-6 flex flex-col h-[calc(100vh-8rem)]">
       <div className="flex items-center justify-between shrink-0">
         <div>
-           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Dataset & Pipeline Monitor</h1>
+           <h1 className="h2 text-theme-text-primary">Dataset & Pipeline Monitor</h1>
            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">End-to-end data observability, composition analysis, and leakage detection.</p>
         </div>
         {report && (
@@ -98,15 +98,15 @@ export default function Data() {
       <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6 pr-2">
         {/* Interactive Pipeline Monitor */}
         <div className="card">
-           <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-6">Data Pipeline Stages</h3>
+           <h3 className="h3 text-theme-text-primary mb-6">Data Pipeline Stages</h3>
            <div className="flex items-center justify-between relative">
              <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 dark:bg-slate-800 -translate-y-1/2 z-0" />
              {pipelineStages.map((stage, idx) => {
                const Icon = stage.icon;
                const isActive = stage.status === 'active';
                const isComplete = stage.status === 'complete';
-               const bgClass = isActive ? 'bg-indigo-500' : isComplete ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-800';
-               const borderClass = isActive ? 'ring-4 ring-indigo-500/30' : '';
+               const bgClass = isActive ? 'bg-theme-primary' : isComplete ? 'bg-theme-secondary' : 'bg-slate-200 dark:bg-slate-800';
+               const borderClass = isActive ? 'ring-4 ring-theme-primary/30' : '';
                const iconColor = (isActive || isComplete) ? 'text-white' : 'text-slate-400';
                
                return (
@@ -115,7 +115,7 @@ export default function Data() {
                      <Icon className={`w-5 h-5 ${iconColor}`} />
                    </div>
                    <div className="text-center">
-                     <p className={`text-sm font-semibold ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-700 dark:text-slate-300'}`}>{stage.name}</p>
+                     <p className={`text-sm font-semibold ${isActive ? 'text-theme-primary' : 'text-theme-text-primary'}`}>{stage.name}</p>
                      <p className="text-xs font-mono text-slate-500">{stage.count} samples</p>
                    </div>
                  </div>
@@ -126,14 +126,14 @@ export default function Data() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card h-[350px] flex flex-col">
-             <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Dataset Composition (Modality)</h3>
+             <h3 className="h3 text-theme-text-primary mb-2">Dataset Composition (Modality)</h3>
              <div className="flex-1 min-h-0">
                 <ReactECharts option={modalityOptions} style={{ height: '100%', width: '100%' }} />
              </div>
           </div>
           
           <div className="card h-[350px] flex flex-col">
-             <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">Token Length Distribution</h3>
+             <h3 className="h3 text-theme-text-primary mb-2">Token Length Distribution</h3>
              <div className="flex-1 min-h-0">
                 <ReactECharts option={tokenOptions} style={{ height: '100%', width: '100%' }} />
              </div>
@@ -143,7 +143,7 @@ export default function Data() {
         {/* Leakage Diagnostics */}
         {report ? (
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Leakage Detection Results</h3>
+            <h3 className="h3 text-theme-text-primary">Leakage Detection Results</h3>
             
             {report.results?.map((res, i) => {
               const Icon = res.passed ? ShieldCheck : ShieldAlert;
