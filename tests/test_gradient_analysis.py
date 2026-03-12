@@ -1,19 +1,3 @@
-"""
-GradGlass — Gradient Analysis Tests
-=====================================
-Tests for:
-  - gradient_flow_analysis() in diff.py
-      · converged MNIST should produce zero VANISHING flags (near-zero *mean*
-        but healthy *norm* is expected and must not be penalised)
-      · truly dead layers (both mean AND norm near zero) must be flagged
-      · exploding gradients (large mean or large norm) must be flagged
-      · NOISY flag fires on low SNR regardless of VANISHING/EXPLODING state
-  - Builtin analysis tests in analysis/builtins.py
-      · GRAD_VANISHING  — norm-based: warns only when norm < 1e-7
-      · GRAD_EXPLODING  — norm-based: warns only when norm > 100
-      · GRAD_NAN_INF    — fires on NaN / Inf in any stat field
-      · GRAD_LAYER_IMBALANCE — fires when max/min norm ratio > 100
-"""
 import json
 import shutil
 import tempfile
@@ -27,26 +11,12 @@ from gradglass.analysis.registry import TestContext, TestStatus
 from gradglass.diff import gradient_flow_analysis
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _make_summaries(layers_per_step: list[dict]) -> list[dict]:
-    """
-    Build the gradient-summary list that gradient_flow_analysis() expects.
-
-    Each item in layers_per_step is a dict of  {layer_name: {mean, var, max, norm, ...}}.
-    Returns a list of  {"step": N, "layers": {...}}  entries.
-    """
+def _make_summaries(layers_per_step: list[dict]) -> list[dict]: 
     return [{"step": i + 1, "layers": layers} for i, layers in enumerate(layers_per_step)]
 
 
-def _healthy_mnist_layers():
-    """
-    8-layer stat snapshot that mirrors a real, converged MNIST-CNN run.
-
-    Key property: fc2.bias and fc2.weight have near-zero *mean* (signed grads
-    cancel in a converged model) but healthy *norm* values.  This must NOT
-    produce a VANISHING flag after the fix.
-    """
+def _healthy_mnist_layers(): 
     return {
         "conv1.bias":   {"mean":  2.13e-04, "var": 1.2e-06, "max": 0.0091, "norm": 0.0352},
         "conv1.weight": {"mean": -1.05e-05, "var": 8.4e-08, "max": 0.0061, "norm": 0.0621},
@@ -69,7 +39,6 @@ def tmp_store():
 
 
 def _write_grad_summaries(store, run_id: str, steps: list[dict]):
-    """Write gradient summary JSON files into the artifact store."""
     run_dir = store.ensure_run_dir(run_id)
     grad_dir = run_dir / "gradients"
     grad_dir.mkdir(exist_ok=True)
