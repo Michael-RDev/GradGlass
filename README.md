@@ -249,6 +249,7 @@ def my_custom_check(ctx):
 | [Data Leakage Detection](docs/leakage.md) | The 7 leakage checks, thresholds, and the `LeakageDetector` class |
 | [Analysis System](docs/analysis.md) | Built-in test catalog, custom test authoring, `AnalysisRunner` |
 | [Dashboard](docs/dashboard.md) | Every dashboard page , what it shows and how to read it |
+| [Dashboard Features Summary](docs/dashboard-features-summary.md) | Deep technical reference for the current React UI — all routed pages, data sources, interactions, and mock vs backend-driven visuals (as of March 12, 2026) |
 | [Artifact Storage](docs/artifacts.md) | Directory layout, every file explained, `ArtifactStore` API |
 | [Configuration](docs/configuration.md) | All config options with types, defaults, and where to set them |
 | [Contributing](CONTRIBUTING.md) | Dev setup, project layout, tests, PR conventions |

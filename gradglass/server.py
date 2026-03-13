@@ -16,6 +16,25 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from gradglass.artifacts import ArtifactStore
 from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, architecture_diff
+from gradglass.experiment_tracking import build_overview_snapshot
+
+
+def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    meta = store.get_run_metadata(run_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
+    metric_rows = metrics if metrics is not None else store.get_metrics(run_id)
+    runtime_state = store.get_runtime_state(run_id)
+    sklearn_diagnostics = store.get_sklearn_diagnostics(run_id)
+
+    return build_overview_snapshot(
+        run_id=run_id,
+        metadata=meta,
+        metrics=metric_rows,
+        runtime_state=runtime_state,
+        sklearn_diagnostics=sklearn_diagnostics,
+    )
 
 
 def create_app(store):
@@ -53,6 +72,10 @@ def create_app(store):
     async def get_metrics(run_id):
         metrics = store.get_metrics(run_id)
         return {"run_id": run_id, "metrics": metrics, "total": len(metrics)}
+
+    @app.get("/api/runs/{run_id}/overview")
+    async def get_overview(run_id):
+        return get_overview_snapshot(store, run_id)
 
     @app.get("/api/runs/{run_id}/alerts")
     async def get_alerts(run_id):
@@ -378,6 +401,23 @@ def create_app(store):
                 if new_metrics:
                     last_step = new_metrics[-1].get("step", last_step)
                     await websocket.send_json({"type": "metrics_update", "data": new_metrics})
+                try:
+                    overview = get_overview_snapshot(store, run_id, metrics=metrics)
+                    await websocket.send_json({"type": "overview_update", "data": overview})
+                except HTTPException:
+                    await websocket.send_json(
+                        {
+                            "type": "overview_update",
+                            "data": {
+                                "run_id": run_id,
+                                "status": "failed",
+                                "health_state": "FAILED",
+                                "total_steps_source": "unknown",
+                                "eta_s": None,
+                                "eta_reason": "Run not found",
+                            },
+                        }
+                    )
                 await asyncio.sleep(1.0)
         except WebSocketDisconnect:
             pass

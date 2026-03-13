@@ -31,6 +31,13 @@ class ArtifactStore:
         with open(meta_path) as f:
             return json.load(f)
 
+    def get_runtime_state(self, run_id):
+        state_path = self.root / "runs" / run_id / "runtime_state.json"
+        if not state_path.exists():
+            return None
+        with open(state_path) as f:
+            return json.load(f)
+
     def list_runs(self):
         runs = []
         runs_dir = self.root / "runs"
@@ -132,6 +139,22 @@ class ArtifactStore:
             except (ValueError, json.JSONDecodeError):
                 continue
         return summaries
+
+    def get_sklearn_diagnostics(self, run_id):
+        grad_dir = self.root / "runs" / run_id / "gradients"
+        if not grad_dir.exists():
+            return []
+
+        diagnostics = []
+        for f_path in sorted(grad_dir.glob("sklearn_diagnostics_step_*.json")):
+            try:
+                step = int(f_path.stem.split("_")[-1])
+                with open(f_path) as f:
+                    data = json.load(f)
+                diagnostics.append({"step": step, **data})
+            except (ValueError, json.JSONDecodeError):
+                continue
+        return diagnostics
 
     def get_activation_stats(self, run_id):
         act_dir = self.root / "runs" / run_id / "activations"

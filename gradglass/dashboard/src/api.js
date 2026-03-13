@@ -20,6 +20,10 @@ export async function fetchMetrics(runId) {
   return fetchJSON(`/runs/${runId}/metrics`);
 }
 
+export async function fetchOverview(runId) {
+  return fetchJSON(`/runs/${runId}/overview`);
+}
+
 export async function fetchCheckpoints(runId) {
   return fetchJSON(`/runs/${runId}/checkpoints`);
 }

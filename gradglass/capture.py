@@ -539,6 +539,16 @@ def safe_json(v):
     return str(v)
 
 
+def _safe_positive_int(value):
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 class SklearnCaptureAdapter:
     """Capture adapter for scikit-learn estimators.
 
@@ -905,6 +915,26 @@ class GradGlassKerasCallback(_KerasCallbackBase):
             super().__init__()
         self.run = run
 
+    def on_train_begin(self, logs=None):
+        params = getattr(self, "params", {}) or {}
+        total_steps = None
+
+        epochs = _safe_positive_int(params.get("epochs"))
+        steps_per_epoch = _safe_positive_int(params.get("steps"))
+        if steps_per_epoch is None:
+            steps_per_epoch = _safe_positive_int(params.get("steps_per_epoch"))
+
+        if epochs and steps_per_epoch:
+            total_steps = epochs * steps_per_epoch
+
+        self.run._write_runtime_state(
+            status="running",
+            event="keras_train_begin",
+            current_step=self.run.step,
+            total_steps=total_steps,
+            fatal_exception=None,
+        )
+
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
         self.run.log(**logs)
@@ -917,3 +947,4 @@ class GradGlassKerasCallback(_KerasCallbackBase):
             entry = {"step": self.run.step, "timestamp": time.time(), **logs}
             with open(self.run.metrics_file, "a") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
+        self.run._write_runtime_state(event="keras_batch_end", current_step=self.run.step)

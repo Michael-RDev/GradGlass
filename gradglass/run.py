@@ -7,9 +7,12 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 import numpy as np
+from gradglass.experiment_tracking import infer_total_steps_from_config
 
 if TYPE_CHECKING:
     from gradglass.artifacts import ArtifactStore
+
+_UNSET = object()
 
 
 class Run:
@@ -28,6 +31,7 @@ class Run:
         self.capture_config = {}
         self.auto_checkpoint_interval = None
         self.metrics_file = self.run_dir / "metrics.jsonl"
+        self.runtime_state_file = self.run_dir / "runtime_state.json"
         self.start_time = time.time()
         self.server_process = None
         self.server_port = None
@@ -35,16 +39,22 @@ class Run:
         self.lock = threading.Lock()
         self._git_commit = self._capture_git_commit()
         self.write_metadata(status="running")
+        self._write_runtime_state(
+            status="running",
+            event="init",
+            monitor_enabled=bool(self.options.get("monitor", False)),
+            monitor_port=self.options.get("port"),
+            current_step=self.step,
+            total_steps=infer_total_steps_from_config(self.options),
+            fatal_exception=None,
+        )
 
     @staticmethod
     def _capture_git_commit() -> Optional[str]:
-        """Read the current HEAD commit hash once. Returns None if not in a git repo."""
         try:
             import subprocess
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
+
+            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip()
         except Exception:
@@ -67,6 +77,7 @@ class Run:
         run.auto_open = False
         run.options = {}
         run.metrics_file = run.run_dir / "metrics.jsonl"
+        run.runtime_state_file = run.run_dir / "runtime_state.json"
         run.start_time = None
         run.server_process = None
         run.server_port = None
@@ -119,6 +130,80 @@ class Run:
         with open(self.run_dir / "metadata.json", "w") as f:
             json.dump(meta, f, indent=2, default=str)
 
+    def _read_runtime_state(self) -> dict[str, Any]:
+        if not self.runtime_state_file.exists():
+            return {}
+        try:
+            with open(self.runtime_state_file) as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    @staticmethod
+    def _collect_resource_snapshot() -> Optional[dict[str, Any]]:
+        try:
+            import psutil
+        except ImportError:
+            return None
+        try:
+            proc = psutil.Process()
+            return {
+                "rss_bytes": int(proc.memory_info().rss),
+                "cpu_percent": float(proc.cpu_percent(interval=None)),
+            }
+        except Exception:
+            return None
+
+    def _write_runtime_state(
+        self,
+        *,
+        status: Optional[str] = None,
+        event: Optional[str] = None,
+        monitor_enabled: Optional[bool] = None,
+        monitor_port: Optional[int] = None,
+        current_step: Optional[int] = None,
+        total_steps: Optional[int] = None,
+        fatal_exception: Any = _UNSET,
+        heartbeat_ts: Optional[float] = None,
+    ) -> None:
+        ts = float(heartbeat_ts if heartbeat_ts is not None else time.time())
+        with self.lock:
+            state = self._read_runtime_state()
+            state["heartbeat_ts"] = ts
+            state["current_step"] = int(current_step if current_step is not None else self.step)
+            if self.start_time is not None:
+                state.setdefault("start_time_epoch", float(self.start_time))
+            if event is not None:
+                state["last_event"] = event
+            if status is not None:
+                state["status"] = status
+            if monitor_enabled is not None:
+                state["monitor_enabled"] = bool(monitor_enabled)
+            if monitor_port is not None:
+                try:
+                    state["monitor_port"] = int(monitor_port)
+                except (TypeError, ValueError):
+                    pass
+            if total_steps is not None:
+                if total_steps > 0:
+                    state["total_steps"] = int(total_steps)
+                elif "total_steps" in state:
+                    state.pop("total_steps", None)
+            if fatal_exception is not _UNSET:
+                state["fatal_exception"] = None if fatal_exception in (None, "") else str(fatal_exception)
+
+            resource = self._collect_resource_snapshot()
+            if resource is not None:
+                state["resource_tracking_available"] = True
+                state["resource"] = resource
+                state["resource_updated_ts"] = ts
+            else:
+                state.setdefault("resource_tracking_available", False)
+
+            with open(self.runtime_state_file, "w") as f:
+                json.dump(state, f, indent=2, default=str)
+
     def watch(
         self,
         model,
@@ -128,8 +213,8 @@ class Run:
         layers="trainable",
         sample_batches=2,
         every=50,
-        monitor=False,
-        monitor_port=0,
+        monitor=None,
+        monitor_port=None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -142,6 +227,13 @@ class Run:
         }
         self.framework = self.detectframework(model)
         self.write_metadata()
+        self._write_runtime_state(
+            status="running",
+            event="watch",
+            current_step=self.step,
+            total_steps=self._infer_total_steps_from_options_or_model(),
+            fatal_exception=None,
+        )
         if self.framework in ("sklearn", "xgboost", "lightgbm"):
             from gradglass.capture import SklearnCaptureAdapter
 
@@ -158,8 +250,16 @@ class Run:
             )
             self.engine.attach_hooks()
         self.engine.extract_architecture()
-        if monitor:
-            self.monitor(port=monitor_port, open_browser=True)
+        monitor_enabled = bool(self.options.get("monitor", False)) if monitor is None else bool(monitor)
+        resolved_monitor_port = self.options.get("port", 0) if monitor_port is None else monitor_port
+        self._write_runtime_state(
+            event="watch_ready",
+            monitor_enabled=monitor_enabled,
+            monitor_port=resolved_monitor_port if resolved_monitor_port is not None else 0,
+            current_step=self.step,
+        )
+        if monitor_enabled:
+            self.monitor(port=resolved_monitor_port or 0, open_browser=True)
         return self
 
     def detectframework(self, model):
@@ -184,6 +284,33 @@ class Run:
             pass
         return "unknown"
 
+    def _infer_total_steps_from_options_or_model(self) -> Optional[int]:
+        config_total = infer_total_steps_from_config(self.options)
+        if config_total and config_total > 0:
+            return config_total
+
+        if self.model is None:
+            return None
+
+        for key in ("n_estimators", "max_iter", "num_iterations"):
+            value = _safe_positive_int(getattr(self.model, key, None))
+            if value is not None:
+                return value
+
+        get_params = getattr(self.model, "get_params", None)
+        if callable(get_params):
+            try:
+                params = get_params()
+            except Exception:
+                params = {}
+            if isinstance(params, dict):
+                for key in ("n_estimators", "max_iter", "num_iterations"):
+                    value = _safe_positive_int(params.get(key))
+                    if value is not None:
+                        return value
+
+        return None
+
     def log(self, **metrics):
         self.step += 1
         entry = {"step": self.step, "timestamp": time.time(), **metrics}
@@ -197,11 +324,13 @@ class Run:
             self.engine.capture_gradients(self.step)
         if self.auto_checkpoint_interval and self.step % self.auto_checkpoint_interval == 0:
             self.checkpoint(step=self.step)
+        self._write_runtime_state(event="log", current_step=self.step)
 
     def log_batch(self, x, y=None, y_pred=None, loss=None):
         self.step += 1
         if hasattr(self, "engine"):
             self.engine.log_batch_predictions(step=self.step, x=x, y=y, y_pred=y_pred, loss=loss)
+        self._write_runtime_state(event="log_batch", current_step=self.step)
 
     def checkpoint(self, step=None, tag=None):
         step = step or self.step
@@ -230,6 +359,7 @@ class Run:
 
     def finish(self, open=False, analyze=True, print_summary=True):
         self.flush()
+        self._write_runtime_state(status="complete", event="finish", current_step=self.step, fatal_exception=None)
         self.write_metadata(status="complete")
         if hasattr(self, "engine"):
             self.engine.cleanup()
@@ -241,6 +371,27 @@ class Run:
                 # Server already running from monitor(), just open the browser
                 url = f"http://localhost:{self.server_port}/?run={self.run_id}"
                 webbrowser.open(url)
+            else:
+                self.open()
+        return report
+
+    def fail(self, error: Any, open=False, analyze=False, print_summary=True):
+        self.flush()
+        self._write_runtime_state(
+            status="failed",
+            event="fail",
+            current_step=self.step,
+            fatal_exception=error,
+        )
+        self.write_metadata(status="failed")
+        if hasattr(self, "engine"):
+            self.engine.cleanup()
+        report = None
+        if analyze:
+            report = self.analyze(print_summary=print_summary)
+        if open:
+            if self.server_port is not None:
+                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
             else:
                 self.open()
         return report
@@ -290,11 +441,23 @@ class Run:
             if open_browser:
                 url = f"http://localhost:{self.server_port}/?run={self.run_id}"
                 webbrowser.open(url)
+            self._write_runtime_state(
+                event="monitor_reuse",
+                monitor_enabled=True,
+                monitor_port=self.server_port,
+                current_step=self.step,
+            )
             return self.server_port
 
         app = create_app(self.store)
         actual_port = start_server(app, port=port)
         self.server_port = actual_port
+        self._write_runtime_state(
+            event="monitor_start",
+            monitor_enabled=True,
+            monitor_port=actual_port,
+            current_step=self.step,
+        )
         url = f"http://localhost:{actual_port}/?run={self.run_id}"
         print(f"\U0001f52c GradGlass live monitor: {url}")
         if open_browser:
@@ -350,7 +513,6 @@ class Run:
         return report
 
     def check_leakage_from_loaders(self, train_loader, test_loader, max_samples=2000, print_summary=True):
-        """Run data leakage detection from PyTorch DataLoaders."""
         import numpy as np
 
         try:
@@ -481,6 +643,7 @@ class Run:
                     )
             except Exception:
                 pass
+        self._write_runtime_state(event="fit", current_step=self.step)
 
         return self.model
 
@@ -519,3 +682,13 @@ def json_default(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     return str(obj)
+
+
+def _safe_positive_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None

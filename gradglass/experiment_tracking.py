@@ -1,0 +1,691 @@
+from __future__ import annotations
+
+import statistics
+import time
+from typing import Any, Optional, Union
+
+Number = Union[float, int]
+Series = list[list[float]]
+TERMINAL_STATUSES = {"complete", "completed", "finished"}
+
+
+class BaseExperimentAdapter:
+    """Normalize run metadata + logged metrics into an overview snapshot."""
+
+    train_loss_candidates: tuple[str, ...] = (
+        "loss",
+        "train_loss",
+        "training_loss",
+        "train_logloss",
+        "train_mlogloss",
+        "train_rmse",
+        "train_mae",
+        "train_mse",
+    )
+    val_loss_candidates: tuple[str, ...] = (
+        "val_loss",
+        "validation_loss",
+        "valid_loss",
+        "test_loss",
+        "validation_0_logloss",
+        "validation_0_mlogloss",
+        "validation_0_rmse",
+        "validation_0_mae",
+        "validation_0_mse",
+    )
+    lr_candidates: tuple[str, ...] = ("lr", "learning_rate")
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        framework: str,
+        metadata: dict[str, Any],
+        metrics: list[dict[str, Any]],
+        runtime_state: Optional[dict[str, Any]],
+        sklearn_diagnostics: list[dict[str, Any]],
+        now_ts: Optional[float] = None,
+    ):
+        self.run_id = run_id
+        self.framework = framework
+        self.metadata = metadata or {}
+        self.metrics = metrics or []
+        self.runtime_state = runtime_state or {}
+        self.sklearn_diagnostics = sklearn_diagnostics or []
+        self.now_ts = float(now_ts) if now_ts is not None else time.time()
+
+    def build_snapshot(self) -> dict[str, Any]:
+        status = self._resolve_status()
+
+        current_step = self._resolve_current_step()
+        total_steps, total_steps_source = self._resolve_total_steps(current_step)
+
+        train_loss = self._resolve_loss_history()
+        val_loss = self._resolve_val_loss_history()
+        lr_history = self._resolve_lr_history(current_step)
+
+        latest_loss = train_loss[-1][1] if train_loss else None
+        latest_val_loss = val_loss[-1][1] if val_loss else None
+        current_lr = lr_history[-1][1] if lr_history else None
+
+        elapsed_time_s = self._resolve_elapsed_time()
+        eta_s, eta_reason = self._estimate_eta(status=status, current_step=current_step, total_steps=total_steps)
+
+        heartbeat_ts = self._resolve_heartbeat()
+        monitor_enabled = bool(self.runtime_state.get("monitor_enabled", self.metadata.get("config", {}).get("monitor", False)))
+        resource_tracking_available = bool(self.runtime_state.get("resource_tracking_available", False))
+
+        health_state = self._compute_health(
+            status=status,
+            heartbeat_ts=heartbeat_ts,
+            current_step=current_step,
+            resource_tracking_available=resource_tracking_available,
+        )
+
+        return {
+            "run_id": self.run_id,
+            "framework": self.framework,
+            "status": status,
+            "health_state": health_state,
+            "current_step": current_step,
+            "total_steps": total_steps,
+            "total_steps_source": total_steps_source,
+            "elapsed_time_s": elapsed_time_s,
+            "eta_s": eta_s,
+            "eta_reason": eta_reason,
+            "eta_is_live": bool(eta_s is not None and status == "running" and monitor_enabled),
+            "loss_history": train_loss,
+            "val_loss_history": val_loss,
+            "lr_history": lr_history,
+            "heartbeat_ts": heartbeat_ts,
+            "resource_tracking_available": resource_tracking_available,
+            "monitor_enabled": monitor_enabled,
+            "latest_loss": latest_loss,
+            "latest_val_loss": latest_val_loss,
+            "current_lr": current_lr,
+            "updated_at": self.now_ts,
+        }
+
+    def _resolve_status(self) -> str:
+        runtime_status = str(self.runtime_state.get("status", "")).strip().lower()
+        if runtime_status:
+            return runtime_status
+        return str(self.metadata.get("status", "unknown")).strip().lower() or "unknown"
+
+    def _resolve_current_step(self) -> int:
+        runtime_step = _safe_int(self.runtime_state.get("current_step"))
+        if runtime_step is not None:
+            return max(runtime_step, 0)
+
+        metric_steps = [_safe_int(m.get("step")) for m in self.metrics]
+        metric_steps = [s for s in metric_steps if s is not None]
+        if metric_steps:
+            return max(metric_steps)
+
+        return 0
+
+    def _resolve_total_steps(self, current_step: int) -> tuple[Optional[int], str]:
+        runtime_total = _safe_int(self.runtime_state.get("total_steps"))
+        if runtime_total and runtime_total > 0:
+            return runtime_total, "runtime"
+
+        config = self.metadata.get("config") or {}
+        explicit_total = infer_total_steps_from_config(config)
+        if explicit_total and explicit_total > 0:
+            return explicit_total, "config"
+
+        epoch_total = infer_total_steps_from_epoch_progress(self.metrics, config)
+        if epoch_total and epoch_total > 0:
+            return epoch_total, "epoch_inference"
+
+        diagnostics_total = self._infer_total_steps_from_diagnostics()
+        if diagnostics_total and diagnostics_total > 0:
+            return diagnostics_total, "diagnostics"
+
+        # If this run is already complete and we do not have a better estimate,
+        # current step is the only truthful total we can report.
+        if self._resolve_status() in TERMINAL_STATUSES and current_step > 0:
+            return current_step, "completion_fallback"
+        return None, "unknown"
+
+    def _infer_total_steps_from_diagnostics(self) -> Optional[int]:
+        for diag in reversed(self.sklearn_diagnostics):
+            n_iter = _safe_int(diag.get("n_iter"))
+            if n_iter and n_iter > 0:
+                return n_iter
+            loss_curve = diag.get("loss_curve")
+            if isinstance(loss_curve, list) and loss_curve:
+                return len(loss_curve)
+        return None
+
+    def _resolve_elapsed_time(self) -> float:
+        start_ts = _safe_float(self.runtime_state.get("start_time_epoch"))
+        if start_ts is None:
+            start_ts = _safe_float(self.metadata.get("start_time_epoch"))
+        if start_ts is None:
+            first_metric_ts = _first_metric_timestamp(self.metrics)
+            if first_metric_ts is not None:
+                start_ts = first_metric_ts
+
+        if start_ts is None:
+            return 0.0
+        return max(0.0, self.now_ts - start_ts)
+
+    def _resolve_heartbeat(self) -> Optional[float]:
+        heartbeat = _safe_float(self.runtime_state.get("heartbeat_ts"))
+        if heartbeat is not None:
+            return heartbeat
+        latest_metric_ts = _latest_metric_timestamp(self.metrics)
+        if latest_metric_ts is not None:
+            return latest_metric_ts
+        return _safe_float(self.metadata.get("start_time_epoch"))
+
+    def _resolve_loss_history(self) -> Series:
+        for key in self.train_loss_candidates:
+            series = _series_from_metrics(self.metrics, key)
+            if series:
+                return series
+
+        # Generic fallback: any non-val key containing "loss"
+        for key in _discover_metric_keys(self.metrics):
+            low = key.lower()
+            if "loss" in low and "val" not in low and "valid" not in low and "test" not in low:
+                series = _series_from_metrics(self.metrics, key)
+                if series:
+                    return series
+        return []
+
+    def _resolve_val_loss_history(self) -> Series:
+        for key in self.val_loss_candidates:
+            series = _series_from_metrics(self.metrics, key)
+            if series:
+                return series
+
+        # Generic fallback: val/test keys containing "loss"
+        for key in _discover_metric_keys(self.metrics):
+            low = key.lower()
+            if ("val" in low or "valid" in low or "test" in low) and "loss" in low:
+                series = _series_from_metrics(self.metrics, key)
+                if series:
+                    return series
+        return []
+
+    def _resolve_lr_history(self, current_step: int) -> Series:
+        for key in self.lr_candidates:
+            series = _series_from_metrics(self.metrics, key)
+            if series:
+                return series
+
+        # Config fallback for frameworks that do not expose a dynamic LR schedule.
+        config = self.metadata.get("config") or {}
+        static_lr = _safe_float(config.get("lr"))
+        if static_lr is None:
+            static_lr = _safe_float(config.get("learning_rate"))
+        if static_lr is None:
+            static_lr = _safe_float(config.get("eta"))
+
+        if static_lr is None or current_step <= 0:
+            return []
+        return [[1.0, static_lr], [float(current_step), static_lr]]
+
+    def _estimate_eta(self, *, status: str, current_step: int, total_steps: Optional[int]) -> tuple[Optional[float], Optional[str]]:
+        if status in TERMINAL_STATUSES:
+            return 0.0, None
+        if status == "failed":
+            return None, "ETA unavailable (run failed)"
+        if total_steps is None:
+            return None, "ETA unavailable (total steps unknown)"
+        if current_step <= 0:
+            return None, "ETA unavailable (insufficient progress)"
+        if current_step >= total_steps:
+            return None, "ETA recalibrating (progress reached estimated total)"
+
+        step_seconds = _smoothed_step_time(self.metrics)
+        if step_seconds is None:
+            return None, "ETA unavailable (not enough timing samples)"
+
+        remaining_steps = max(total_steps - current_step, 0)
+        return max(0.0, remaining_steps * step_seconds), None
+
+    def _compute_health(
+        self,
+        *,
+        status: str,
+        heartbeat_ts: Optional[float],
+        current_step: int,
+        resource_tracking_available: bool,
+    ) -> str:
+        if self.runtime_state.get("fatal_exception"):
+            return "FAILED"
+
+        if status == "failed":
+            return "FAILED"
+
+        if status in TERMINAL_STATUSES:
+            return "HEALTHY"
+
+        if heartbeat_ts is None:
+            return "WARNING"
+
+        heartbeat_age = max(0.0, self.now_ts - heartbeat_ts)
+
+        cadence = _metric_cadence_seconds(self.metrics)
+        if cadence is None:
+            cadence = 2.0 if current_step > 0 else 5.0
+
+        warning_after = max(10.0, cadence * 3.0)
+        stalled_after = max(30.0, cadence * 8.0)
+
+        if heartbeat_age >= stalled_after:
+            return "STALLED"
+        if heartbeat_age >= warning_after:
+            return "WARNING"
+
+        # Resource telemetry is optional, but if explicitly required and unavailable
+        # we mark WARNING while the run is active.
+        if bool(self.runtime_state.get("resource_tracking_required")) and not resource_tracking_available:
+            return "WARNING"
+
+        return "HEALTHY"
+
+
+class PyTorchExperimentAdapter(BaseExperimentAdapter):
+    pass
+
+
+class TensorFlowExperimentAdapter(BaseExperimentAdapter):
+    lr_candidates = ("lr", "learning_rate")
+
+
+class SklearnExperimentAdapter(BaseExperimentAdapter):
+    train_loss_candidates = (
+        "loss",
+        "train_loss",
+        "validation_0_logloss",
+        "validation_0_mlogloss",
+        "validation_0_rmse",
+        "validation_0_mae",
+        "validation_0_mse",
+    )
+
+    def _resolve_current_step(self) -> int:
+        step = super()._resolve_current_step()
+        if step > 0:
+            return step
+
+        for diag in reversed(self.sklearn_diagnostics):
+            n_iter = _safe_int(diag.get("n_iter"))
+            if n_iter and n_iter > 0:
+                return n_iter
+            loss_curve = diag.get("loss_curve")
+            if isinstance(loss_curve, list) and loss_curve:
+                return len(loss_curve)
+        return 0
+
+    def _resolve_loss_history(self) -> Series:
+        series = super()._resolve_loss_history()
+        if series:
+            return series
+
+        for diag in reversed(self.sklearn_diagnostics):
+            loss_curve = diag.get("loss_curve")
+            if not isinstance(loss_curve, list) or not loss_curve:
+                continue
+            out: Series = []
+            for idx, value in enumerate(loss_curve, start=1):
+                val = _safe_float(value)
+                if val is None:
+                    continue
+                out.append([float(idx), val])
+            if out:
+                return out
+        return []
+
+
+class XGBoostExperimentAdapter(BaseExperimentAdapter):
+    train_loss_candidates = (
+        "train_logloss",
+        "train_mlogloss",
+        "train_rmse",
+        "train_mae",
+        "train_mse",
+        "train_error",
+    )
+    val_loss_candidates = (
+        "validation_0_logloss",
+        "validation_0_mlogloss",
+        "validation_0_rmse",
+        "validation_0_mae",
+        "validation_0_mse",
+        "test_logloss",
+        "test_mlogloss",
+        "test_rmse",
+        "test_mae",
+        "test_mse",
+        "test_error",
+    )
+
+    def _resolve_loss_history(self) -> Series:
+        series = super()._resolve_loss_history()
+        if series:
+            return series
+
+        # Dynamic fallback: first train_* metric with enough points.
+        for key in _discover_metric_keys(self.metrics):
+            low = key.lower()
+            if low.startswith("train_"):
+                series = _series_from_metrics(self.metrics, key)
+                if len(series) >= 2:
+                    return series
+        return []
+
+    def _resolve_val_loss_history(self) -> Series:
+        series = super()._resolve_val_loss_history()
+        if series:
+            return series
+
+        for key in _discover_metric_keys(self.metrics):
+            low = key.lower()
+            if low.startswith("validation_") or low.startswith("test_"):
+                series = _series_from_metrics(self.metrics, key)
+                if len(series) >= 2:
+                    return series
+        return []
+
+
+_ADAPTER_REGISTRY: dict[str, type[BaseExperimentAdapter]] = {}
+
+
+def register_experiment_adapter(
+    frameworks: Union[str, list[str], tuple[str, ...]], adapter_cls: type[BaseExperimentAdapter]
+) -> None:
+    names = [frameworks] if isinstance(frameworks, str) else list(frameworks)
+    for name in names:
+        _ADAPTER_REGISTRY[name.lower()] = adapter_cls
+
+
+def get_experiment_adapter(framework: str) -> type[BaseExperimentAdapter]:
+    return _ADAPTER_REGISTRY.get((framework or "unknown").lower(), BaseExperimentAdapter)
+
+
+def infer_framework_for_tracking(metadata: dict[str, Any], metrics: list[dict[str, Any]]) -> str:
+    fw = str((metadata or {}).get("framework") or "").strip().lower()
+    if fw and fw != "unknown":
+        return fw
+
+    config = (metadata or {}).get("config") or {}
+    if any(k in config for k in ("objective", "eta", "num_boost_round")):
+        return "xgboost"
+
+    keys = _discover_metric_keys(metrics)
+    if any(k.startswith("train_") for k in keys) and any("logloss" in k or "rmse" in k for k in keys):
+        return "xgboost"
+    if any(k.startswith("validation_") for k in keys):
+        return "xgboost"
+
+    return fw or "unknown"
+
+
+def infer_total_steps_from_config(config: dict[str, Any]) -> Optional[int]:
+    if not isinstance(config, dict):
+        return None
+
+    direct_keys = (
+        "total_steps",
+        "max_steps",
+        "num_steps",
+        "steps",
+        "num_boost_round",
+        "n_estimators",
+        "max_iter",
+        "num_iterations",
+        "num_train_steps",
+        "train_steps",
+        "total_train_steps",
+        "max_train_steps",
+    )
+    for key in direct_keys:
+        value = _safe_int(config.get(key))
+        if value and value > 0:
+            return value
+
+    epochs = infer_total_epochs_from_config(config)
+    steps_per_epoch = _safe_int(config.get("steps_per_epoch"))
+    if epochs and epochs > 0 and steps_per_epoch and steps_per_epoch > 0:
+        return epochs * steps_per_epoch
+
+    return None
+
+
+def infer_total_epochs_from_config(config: dict[str, Any]) -> Optional[int]:
+    if not isinstance(config, dict):
+        return None
+
+    epoch_keys = ("epochs", "num_epochs", "n_epochs", "max_epochs")
+    for key in epoch_keys:
+        value = _safe_int(config.get(key))
+        if value and value > 0:
+            return value
+
+    phase1 = _safe_int(config.get("phase1_epochs")) or 0
+    phase2 = _safe_int(config.get("phase2_epochs")) or 0
+    phase_total = phase1 + phase2
+    if phase_total > 0:
+        return phase_total
+
+    return None
+
+
+def infer_total_steps_from_epoch_progress(metrics: list[dict[str, Any]], config: dict[str, Any]) -> Optional[int]:
+    if not metrics or not isinstance(config, dict):
+        return None
+
+    total_epochs = infer_total_epochs_from_config(config)
+    if total_epochs is None or total_epochs <= 0:
+        return None
+
+    max_step_by_epoch: dict[int, int] = {}
+    for metric in metrics:
+        step = _safe_int(metric.get("step"))
+        epoch = _metric_epoch_value(metric)
+        if step is None or epoch is None:
+            continue
+        max_step_by_epoch[epoch] = max(step, max_step_by_epoch.get(epoch, step))
+
+    if len(max_step_by_epoch) < 2:
+        return None
+
+    ordered_epoch_max = sorted(max_step_by_epoch.items(), key=lambda pair: pair[0])
+    boundary_deltas: list[int] = []
+    for idx in range(1, len(ordered_epoch_max)):
+        prev_step = ordered_epoch_max[idx - 1][1]
+        curr_step = ordered_epoch_max[idx][1]
+        delta = curr_step - prev_step
+        if delta > 0:
+            boundary_deltas.append(delta)
+
+    if not boundary_deltas:
+        return None
+
+    estimated_steps_per_epoch = int(round(statistics.median(boundary_deltas)))
+    if estimated_steps_per_epoch <= 0:
+        return None
+
+    inferred_total = estimated_steps_per_epoch * total_epochs
+    return inferred_total if inferred_total > 0 else None
+
+
+def build_overview_snapshot(
+    *,
+    run_id: str,
+    metadata: dict[str, Any],
+    metrics: list[dict[str, Any]],
+    runtime_state: Optional[dict[str, Any]],
+    sklearn_diagnostics: Optional[list[dict[str, Any]]] = None,
+    now_ts: Optional[float] = None,
+) -> dict[str, Any]:
+    framework = infer_framework_for_tracking(metadata, metrics)
+    adapter_cls = get_experiment_adapter(framework)
+    adapter = adapter_cls(
+        run_id=run_id,
+        framework=framework,
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state=runtime_state,
+        sklearn_diagnostics=sklearn_diagnostics or [],
+        now_ts=now_ts,
+    )
+    return adapter.build_snapshot()
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:
+        return None
+    return f
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _series_from_metrics(metrics: list[dict[str, Any]], key: str) -> Series:
+    out: Series = []
+    for m in metrics:
+        step = _safe_int(m.get("step"))
+        value = _safe_float(m.get(key))
+        if step is None or value is None:
+            continue
+        out.append([float(step), value])
+    return out
+
+
+def _discover_metric_keys(metrics: list[dict[str, Any]]) -> list[str]:
+    keys: set[str] = set()
+    for m in metrics:
+        keys.update((k for k in m.keys() if k not in {"step", "timestamp"}))
+    return sorted(keys)
+
+
+def _latest_metric_timestamp(metrics: list[dict[str, Any]]) -> Optional[float]:
+    for m in reversed(metrics):
+        ts = _safe_float(m.get("timestamp"))
+        if ts is not None:
+            return ts
+    return None
+
+
+def _first_metric_timestamp(metrics: list[dict[str, Any]]) -> Optional[float]:
+    for m in metrics:
+        ts = _safe_float(m.get("timestamp"))
+        if ts is not None:
+            return ts
+    return None
+
+
+def _metric_cadence_seconds(metrics: list[dict[str, Any]]) -> Optional[float]:
+    times = [_safe_float(m.get("timestamp")) for m in metrics]
+    times = [t for t in times if t is not None]
+    if len(times) < 3:
+        return None
+
+    deltas = []
+    for idx in range(1, len(times)):
+        dt = times[idx] - times[idx - 1]
+        if dt > 0:
+            deltas.append(dt)
+
+    if len(deltas) < 2:
+        return None
+
+    recent = deltas[-20:]
+    return float(statistics.median(recent)) if recent else None
+
+
+def _smoothed_step_time(metrics: list[dict[str, Any]], alpha: float = 0.25, window: int = 80) -> Optional[float]:
+    if len(metrics) < 2:
+        return None
+
+    # Robust to uneven logging: use seconds-per-step from each positive delta.
+    points: list[tuple[int, float]] = []
+    for m in metrics:
+        step = _safe_int(m.get("step"))
+        ts = _safe_float(m.get("timestamp"))
+        if step is None or ts is None:
+            continue
+        points.append((step, ts))
+
+    if len(points) < 2:
+        return None
+
+    samples: list[float] = []
+    for idx in range(1, len(points)):
+        prev_step, prev_ts = points[idx - 1]
+        step, ts = points[idx]
+        d_step = step - prev_step
+        d_ts = ts - prev_ts
+        if d_step <= 0 or d_ts <= 0:
+            continue
+        samples.append(d_ts / d_step)
+
+    if len(samples) < 2:
+        return None
+
+    recent_samples = samples[-window:] if window > 0 else samples
+    filtered_samples = _filter_outlier_samples(recent_samples)
+
+    ewma: Optional[float] = None
+    for sample in filtered_samples:
+        if ewma is None:
+            ewma = sample
+        else:
+            ewma = alpha * sample + (1.0 - alpha) * ewma
+
+    return ewma
+
+
+def _filter_outlier_samples(samples: list[float]) -> list[float]:
+    if len(samples) < 5:
+        return samples
+
+    median = statistics.median(samples)
+    abs_dev = [abs(sample - median) for sample in samples]
+    mad = statistics.median(abs_dev)
+
+    if mad > 0:
+        # Modified z-score style filtering with a wide threshold to keep
+        # realistic bursts while dropping major timing spikes.
+        scale = 1.4826 * mad
+        filtered = [sample for sample in samples if abs(sample - median) <= 6.0 * scale]
+    else:
+        lower = max(0.0, median * 0.25)
+        upper = median * 4.0 if median > 0 else float("inf")
+        filtered = [sample for sample in samples if lower <= sample <= upper]
+
+    return filtered if len(filtered) >= 2 else samples
+
+
+def _metric_epoch_value(metric: dict[str, Any]) -> Optional[int]:
+    for key in ("epoch", "epoch_idx", "epoch_end"):
+        value = _safe_int(metric.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+register_experiment_adapter("pytorch", PyTorchExperimentAdapter)
+register_experiment_adapter("tensorflow", TensorFlowExperimentAdapter)
+register_experiment_adapter("keras", TensorFlowExperimentAdapter)
+register_experiment_adapter("sklearn", SklearnExperimentAdapter)
+register_experiment_adapter("xgboost", XGBoostExperimentAdapter)
+register_experiment_adapter("lightgbm", XGBoostExperimentAdapter)

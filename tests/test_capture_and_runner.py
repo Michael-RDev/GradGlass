@@ -69,6 +69,12 @@ class ModelWithFrozenLayer(nn.Module):
         return self.trainable(F.relu(self.frozen(x)))
 
 
+def _load_runtime_state(run: Run) -> dict:
+    path = run.run_dir / "runtime_state.json"
+    assert path.exists()
+    return json.loads(path.read_text())
+
+
 @pytest.fixture
 def tmp_dir():
     d = tempfile.mkdtemp()
@@ -486,8 +492,6 @@ class TestRunInit:
 
 
 class TestRunWatch:
-    """Test Run.watch() with a PyTorch model."""
-
     def test_framework_detected(self, tmp_store, model, optimizer):
         run = Run(name="fw", store=tmp_store)
         run.watch(model, optimizer)
@@ -506,10 +510,54 @@ class TestRunWatch:
         assert ret is run
         run.finish(open=False, analyze=False)
 
+    def test_watch_honors_monitor_option_from_run_config(self, tmp_store, model, optimizer, monkeypatch):
+        run = Run(name="monitor-opt", store=tmp_store, monitor=True, port=9876)
+        called = {}
+
+        def fake_monitor(port=0, open_browser=True):
+            called["port"] = port
+            called["open_browser"] = open_browser
+            return 9876
+
+        monkeypatch.setattr(run, "monitor", fake_monitor)
+        run.watch(model, optimizer)
+        assert called["port"] == 9876
+        assert called["open_browser"] is True
+        assert _load_runtime_state(run)["monitor_enabled"] is True
+        run.finish(open=False, analyze=False)
+
+    def test_watch_explicit_monitor_override(self, tmp_store, model, optimizer, monkeypatch):
+        run = Run(name="monitor-off", store=tmp_store, monitor=True, port=9876)
+        called = {"count": 0}
+
+        def fake_monitor(port=0, open_browser=True):
+            called["count"] += 1
+            return 9876
+
+        monkeypatch.setattr(run, "monitor", fake_monitor)
+        run.watch(model, optimizer, monitor=False)
+        assert called["count"] == 0
+        assert _load_runtime_state(run)["monitor_enabled"] is False
+        run.finish(open=False, analyze=False)
+
+    def test_watch_infers_total_steps_from_model_attributes(self, tmp_store, model, optimizer):
+        model.n_estimators = 123
+        run = Run(name="watch-model-steps", store=tmp_store)
+        run.watch(model, optimizer, monitor=False)
+        state = _load_runtime_state(run)
+        assert state["total_steps"] == 123
+        run.finish(open=False, analyze=False)
+
+    def test_watch_prefers_config_total_steps_over_model_attributes(self, tmp_store, model, optimizer):
+        model.n_estimators = 999
+        run = Run(name="watch-config-steps", store=tmp_store, total_steps=42)
+        run.watch(model, optimizer, monitor=False)
+        state = _load_runtime_state(run)
+        assert state["total_steps"] == 42
+        run.finish(open=False, analyze=False)
+
 
 class TestRunLogging:
-    """Test Run.log() and metrics file."""
-
     def test_log_increments_step(self, tmp_store, model, optimizer):
         run = Run(name="log", store=tmp_store)
         run.watch(model, optimizer, every=100)
@@ -562,9 +610,20 @@ class TestRunLogging:
         assert len(ckpts) >= 1
         run.finish(open=False, analyze=False)
 
+    def test_runtime_heartbeat_updates_on_log(self, tmp_store, model, optimizer):
+        run = Run(name="heartbeat-log", store=tmp_store)
+        run.watch(model, optimizer, every=100)
+        before = _load_runtime_state(run)["heartbeat_ts"]
+        time.sleep(0.01)
+        run.log(loss=1.0)
+        state = _load_runtime_state(run)
+        assert state["heartbeat_ts"] >= before
+        assert state["current_step"] == 1
+        assert state["last_event"] == "log"
+        run.finish(open=False, analyze=False)
+
 
 class TestRunLogBatch:
-
     def test_log_batch_increments_step(self, tmp_store, model, optimizer):
         run = Run(name="batch", store=tmp_store)
         run.watch(model, optimizer, every=100)
@@ -572,7 +631,36 @@ class TestRunLogBatch:
         logits = model(x)
         run.log_batch(x=x, y_pred=logits)
         assert run.step == 1
+        state = _load_runtime_state(run)
+        assert state["current_step"] == 1
+        assert state["last_event"] == "log_batch"
         run.finish(open=False, analyze=False)
+
+
+class TestKerasCallbackRuntime:
+    def test_keras_train_begin_sets_total_steps(self, tmp_store):
+        run = Run(name="keras-runtime", store=tmp_store)
+        cb = run.keras_callback()
+        cb.params = {"epochs": 3, "steps": 4}
+        cb.on_train_begin()
+
+        state = _load_runtime_state(run)
+        assert state["total_steps"] == 12
+        assert state["last_event"] == "keras_train_begin"
+
+    def test_keras_batch_end_updates_runtime_state(self, tmp_store):
+        run = Run(name="keras-batch-runtime", store=tmp_store)
+        cb = run.keras_callback()
+        cb.params = {"epochs": 2, "steps": 2}
+        cb.on_train_begin()
+        before = _load_runtime_state(run)["heartbeat_ts"]
+        time.sleep(0.01)
+        cb.on_batch_end(batch=0, logs={"loss": 1.23})
+
+        state = _load_runtime_state(run)
+        assert state["heartbeat_ts"] >= before
+        assert state["current_step"] == 1
+        assert state["last_event"] == "keras_batch_end"
 
 
 class TestRunCheckpoint:
@@ -603,6 +691,19 @@ class TestRunFinish:
 
         meta = json.loads((run.run_dir / "metadata.json").read_text())
         assert meta["status"] == "complete"
+        runtime = _load_runtime_state(run)
+        assert runtime["status"] == "complete"
+
+    def test_fail_sets_status(self, tmp_store, model, optimizer):
+        run = Run(name="failed-run", store=tmp_store)
+        run.watch(model, optimizer, every=100)
+        run.fail("boom", open=False, analyze=False)
+
+        meta = json.loads((run.run_dir / "metadata.json").read_text())
+        runtime = _load_runtime_state(run)
+        assert meta["status"] == "failed"
+        assert runtime["status"] == "failed"
+        assert "boom" in runtime["fatal_exception"]
 
     def test_finish_with_analyze(self, populated_run):
         run, store = populated_run

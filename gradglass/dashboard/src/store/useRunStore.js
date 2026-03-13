@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import { fetchRun, fetchMetrics, fetchAlerts, createMetricsStream } from '../api';
+import { fetchRun, fetchMetrics, fetchAlerts, fetchOverview, createMetricsStream } from '../api';
 
 const useRunStore = create((set, get) => ({
   activeRunId: null,
   metadata: null,
   metrics: [],
   alerts: [],
+  overview: null,
   ws: null,
 
   setActiveRun: async (runId) => {
@@ -14,19 +15,21 @@ const useRunStore = create((set, get) => ({
       ws.close();
     }
     
-    set({ activeRunId: runId, metadata: null, metrics: [], alerts: [], ws: null });
+    set({ activeRunId: runId, metadata: null, metrics: [], alerts: [], overview: null, ws: null });
 
     try {
-      const [metaData, metricsData, alertsData] = await Promise.all([
+      const [metaData, metricsData, alertsData, overviewData] = await Promise.all([
         fetchRun(runId),
         fetchMetrics(runId),
-        fetchAlerts(runId)
+        fetchAlerts(runId),
+        fetchOverview(runId)
       ]);
 
       set({
         metadata: metaData,
         metrics: metricsData?.metrics || [],
-        alerts: alertsData?.alerts || []
+        alerts: alertsData?.alerts || [],
+        overview: overviewData || null
       });
 
       const newWs = createMetricsStream(runId, (message) => {
@@ -34,6 +37,8 @@ const useRunStore = create((set, get) => ({
           set((state) => ({
             metrics: [...state.metrics, ...message.data]
           }));
+        } else if (message.type === 'overview_update') {
+          set({ overview: message.data || null });
         }
       });
 

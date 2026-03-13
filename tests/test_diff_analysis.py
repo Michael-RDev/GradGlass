@@ -1,17 +1,3 @@
-"""
-GradGlass — Diff Viewer Analysis Tests
-======================================
-Tests for the checkpoint diff analysis tests:
-  - WEIGHT_DIFF_COMPUTED
-  - WEIGHT_DIFF_SEVERITY_COUNTS
-  - TOP_CHANGED_LAYERS
-  - UNCHANGED_LAYER_DETECTION
-  - EXCESSIVE_UPDATE_RATIO
-  - TRAINABLE_FROZEN_CONSISTENCY
-  - CHECKPOINT_SHAPE_CONSISTENCY
-
-Also tests the /api/runs/{run_id}/freeze_code server endpoint.
-"""
 import json
 import shutil
 import tempfile
@@ -25,7 +11,6 @@ from gradglass.analysis.registry import TestContext, TestStatus
 from gradglass.diff import full_diff, Severity
 
 
-# ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def tmp_store():
@@ -36,7 +21,6 @@ def tmp_store():
 
 
 def _write_checkpoint(store, run_id, step, weights: dict, num_params=None):
-    """Write a checkpoint .npz + meta JSON to the artifact store."""
     run_dir = store.ensure_run_dir(run_id)
     ckpt_dir = run_dir / "checkpoints"
     ckpt_dir.mkdir(exist_ok=True)

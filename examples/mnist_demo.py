@@ -95,8 +95,8 @@ def main():
     (train_loader, test_loader) = get_loaders()
     model = MnistCNN().to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    run = gg.run("mnist-cnn", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE, monitor=True)
-    run.watch(model, optimizer, activations="auto", gradients="summary", every=1, sample_batches=3, monitor=False)
+    run = gg.run("mnist-cnn", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE)
+    run.watch(model, optimizer, activations="auto", gradients="summary", every=1, sample_batches=3, monitor=True)
     print(f"\nModel: {sum((p.numel() for p in model.parameters())):,} parameters\n")
     for epoch in range(EPOCHS):
         (train_loss, train_acc) = train_epoch(model, train_loader, optimizer, run, epoch)
