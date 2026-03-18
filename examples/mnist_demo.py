@@ -48,8 +48,8 @@ class MnistCNN(nn.Module):
 
 def get_loaders():
     tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-    train_ds = MNIST(DATA_DIR, train=True, download=True, transform=tf)
-    test_ds = MNIST(DATA_DIR, train=False, download=True, transform=tf)
+    train_ds = MNIST(DATA_DIR, train=True, download=True, transform=tf)  # type: ignore
+    test_ds = MNIST(DATA_DIR, train=False, download=True, transform=tf)  # type: ignore
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
     return (train_loader, test_loader)
@@ -96,6 +96,7 @@ def main():
     model = MnistCNN().to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     run = gg.run("mnist-cnn", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE)
+    run.check_leakage_from_loaders(train_loader=train_loader, test_loader=test_loader)
     run.watch(model, optimizer, activations="auto", gradients="summary", every=1, sample_batches=3, monitor=True)
     print(f"\nModel: {sum((p.numel() for p in model.parameters())):,} parameters\n")
     for epoch in range(EPOCHS):

@@ -5,6 +5,7 @@ from gradglass.experiment_tracking import (
     infer_total_epochs_from_config,
     infer_total_steps_from_config,
 )
+import gradglass.experiment_tracking as tracking
 
 
 def test_infer_total_steps_from_config():
@@ -165,6 +166,78 @@ def test_terminal_run_eta_is_zero():
 
     assert snapshot["eta_s"] == 0.0
     assert snapshot["eta_reason"] is None
+
+
+def test_terminal_status_is_normalized_to_completed():
+    metadata = {"framework": "pytorch", "status": "complete", "start_time_epoch": 10.0, "config": {"total_steps": 4}}
+    metrics = [{"step": 4, "timestamp": 14.0, "loss": 0.82}]
+    runtime = {"status": "complete", "heartbeat_ts": 14.0, "current_step": 4}
+
+    snapshot = build_overview_snapshot(
+        run_id="complete-normalized",
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state=runtime,
+        now_ts=14.5,
+    )
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["eta_s"] == 0.0
+
+
+def test_running_reconciles_to_interrupted_when_process_is_dead(monkeypatch):
+    metadata = {"framework": "pytorch", "status": "running", "start_time_epoch": 10.0, "config": {}}
+    runtime = {"status": "running", "heartbeat_ts": 12.0, "current_step": 2, "training_pid": 12345}
+    metrics = [{"step": 1, "timestamp": 11.0, "loss": 1.0}, {"step": 2, "timestamp": 12.0, "loss": 0.9}]
+
+    monkeypatch.setattr(tracking, "_is_pid_alive", lambda _state: False)
+
+    snapshot = build_overview_snapshot(
+        run_id="interrupted-dead-pid",
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state=runtime,
+        now_ts=12.2,
+    )
+
+    assert snapshot["status"] == "interrupted"
+    assert "no longer alive" in (snapshot["status_reason"] or "")
+
+
+def test_running_reconciles_to_interrupted_when_heartbeat_is_stale_and_process_unreachable(monkeypatch):
+    metadata = {"framework": "pytorch", "status": "running", "start_time_epoch": 10.0, "config": {}}
+    runtime = {"status": "running", "heartbeat_ts": 11.0, "current_step": 1}
+    metrics = [{"step": 1, "timestamp": 11.0, "loss": 1.0}]
+
+    monkeypatch.setattr(tracking, "_is_pid_alive", lambda _state: None)
+
+    snapshot = build_overview_snapshot(
+        run_id="interrupted-stale-heartbeat",
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state=runtime,
+        now_ts=90.0,
+    )
+
+    assert snapshot["status"] == "interrupted"
+    assert "heartbeat is stale" in (snapshot["status_reason"] or "")
+
+
+def test_keyboard_interrupt_event_maps_to_cancelled():
+    metadata = {"framework": "pytorch", "status": "running", "start_time_epoch": 10.0, "config": {}}
+    runtime = {"status": "running", "heartbeat_ts": 12.0, "current_step": 2, "last_event": "keyboard_interrupt"}
+    metrics = [{"step": 1, "timestamp": 11.0, "loss": 1.0}, {"step": 2, "timestamp": 12.0, "loss": 0.9}]
+
+    snapshot = build_overview_snapshot(
+        run_id="cancelled-keyboard-interrupt",
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state=runtime,
+        now_ts=12.5,
+    )
+
+    assert snapshot["status"] == "cancelled"
+    assert "explicit stop event" in (snapshot["status_reason"] or "")
 
 
 def test_eta_smoothing_ignores_large_timing_spikes():

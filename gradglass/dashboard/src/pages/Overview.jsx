@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import useRunStore from '../store/useRunStore';
 import { useTheme } from '../components/ThemeProvider';
+import { StatusBadge } from '../components/ui';
 import ReactECharts from 'echarts-for-react';
 import { ShieldCheck, ShieldAlert, AlertTriangle, Zap, Target, BookOpen, Clock, TrendingDown } from 'lucide-react';
 
@@ -186,7 +187,7 @@ export default function Overview() {
   const currentStep = overview?.current_step ?? (metrics.length > 0 ? Math.max(...metrics.map((m) => m.step || 0)) : 0);
   const elapsedTime = overview?.elapsed_time_s ?? (metadata.start_time_epoch ? Date.now() / 1000 - metadata.start_time_epoch : null);
   const resolvedStatus = (overview?.status || metadata?.status || '').toLowerCase();
-  const isTerminalRun = ['complete', 'completed', 'finished'].includes(resolvedStatus);
+  const isTerminalRun = ['complete', 'completed', 'finished', 'failed', 'cancelled', 'interrupted'].includes(resolvedStatus);
   const etaText = isTerminalRun && overview?.eta_s === 0
     ? 'Complete'
     : (overview?.eta_s != null ? formatDuration(overview.eta_s) : (overview?.eta_reason || 'ETA unavailable'));
@@ -194,7 +195,10 @@ export default function Overview() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="h2 text-theme-text-primary">Global Experiment Overview</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="h2 text-theme-text-primary">Global Experiment Overview</h1>
+          <StatusBadge status={resolvedStatus} />
+        </div>
         <div className={`flex items-center gap-2 px-4 py-2 rounded-full border bg-white dark:bg-slate-900 shadow-sm ${style.border}`}>
           <StatusIcon className={`w-5 h-5 ${style.text}`} />
           <span className={`text-sm font-bold tracking-wide ${style.text}`}>SYSTEM: {healthState}</span>

@@ -68,6 +68,10 @@ export async function fetchEvalLab(runId) {
   return fetchJSON(`/runs/${runId}/eval`);
 }
 
+export async function fetchInfrastructureTelemetry(runId) {
+  return fetchJSON(`/runs/${runId}/infrastructure`);
+}
+
 export function createMetricsStream(runId, onMessage) {
   const ws = new WebSocket(`ws://${window.location.host}/api/runs/${runId}/stream`);
   ws.onmessage = (event) => {

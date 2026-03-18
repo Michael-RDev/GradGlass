@@ -16,10 +16,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from gradglass.artifacts import ArtifactStore
 from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, architecture_diff
-from gradglass.experiment_tracking import build_overview_snapshot
+from gradglass.experiment_tracking import build_overview_snapshot, normalize_run_status
+from gradglass.telemetry import collect_infrastructure_telemetry
 
 
-def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[list[dict[str, Any]]] = None):
     meta = store.get_run_metadata(run_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
@@ -38,7 +39,7 @@ def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[l
 
 
 def create_app(store):
-    app = FastAPI(title="GradGlass", description="Neural Network Transparency Engine — Local API", version="1.0.0")
+    app = FastAPI(title="GradGlass", description="Neural Network Transparency Engine", version="1.0.0")
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
     )
@@ -47,6 +48,24 @@ def create_app(store):
     @app.get("/api/runs")
     async def list_runs():
         runs = store.list_runs()
+        for run in runs:
+            run_id = run.get("run_id")
+            if not run_id:
+                run["status"] = normalize_run_status(run.get("status"))
+                continue
+            try:
+                overview = build_overview_snapshot(
+                    run_id=run_id,
+                    metadata=run,
+                    metrics=store.get_metrics(run_id),
+                    runtime_state=store.get_runtime_state(run_id),
+                    sklearn_diagnostics=store.get_sklearn_diagnostics(run_id),
+                )
+                run["status"] = overview.get("status", normalize_run_status(run.get("status")))
+                run["health_state"] = overview.get("health_state")
+                run["heartbeat_ts"] = overview.get("heartbeat_ts")
+            except Exception:
+                run["status"] = normalize_run_status(run.get("status"))
         return {"runs": runs, "total": len(runs)}
 
     @app.get("/api/compare")
@@ -63,7 +82,17 @@ def create_app(store):
         meta = store.get_run_metadata(run_id)
         if meta is None:
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        overview = build_overview_snapshot(
+            run_id=run_id,
+            metadata=meta,
+            metrics=store.get_metrics(run_id),
+            runtime_state=store.get_runtime_state(run_id),
+            sklearn_diagnostics=store.get_sklearn_diagnostics(run_id),
+        )
         meta["run_id"] = run_id
+        meta["status"] = overview.get("status", normalize_run_status(meta.get("status")))
+        meta["health_state"] = overview.get("health_state")
+        meta["heartbeat_ts"] = overview.get("heartbeat_ts")
         meta["metrics_summary"] = store.get_latest_metrics(run_id)
         meta["num_checkpoints"] = len(store.list_checkpoints(run_id))
         return meta
@@ -91,9 +120,15 @@ def create_app(store):
                     elif isinstance(val, float) and (val != val or val == float("inf") or val == float("-inf")):
                         inf_nan = True
                     if inf_nan:
-                        alerts.append({"severity": "high", "title": "NaN or Inf Loss", "message": f"Loss became NaN/Inf at step {m.get('step')}"})
+                        alerts.append(
+                            {
+                                "severity": "high",
+                                "title": "NaN or Inf Loss",
+                                "message": f"Loss became NaN/Inf at step {m.get('step')}",
+                            }
+                        )
                         break
-                        
+
             if len(metrics) > 5:
                 # Simple overfitting check
                 recent = metrics[-5:]
@@ -101,17 +136,29 @@ def create_app(store):
                 val_losses = [m.get("val_loss") for m in recent if m.get("val_loss") is not None]
                 if len(train_losses) == 5 and len(val_losses) == 5:
                     if train_losses[0] > train_losses[-1] and val_losses[0] < val_losses[-1]:
-                        alerts.append({"severity": "medium", "title": "Possible Overfitting", "message": "Validation loss is increasing while training loss is decreasing."})
-                
+                        alerts.append(
+                            {
+                                "severity": "medium",
+                                "title": "Possible Overfitting",
+                                "message": "Validation loss is increasing while training loss is decreasing.",
+                            }
+                        )
+
         summaries = store.get_gradient_summaries(run_id)
         if summaries:
             last_summary = summaries[-1]
             step = last_summary.get("step")
             for layer, data in last_summary.get("layers", {}).items():
                 if data.get("norm", 0) > 10.0:
-                    alerts.append({"severity": "warning", "title": "Large Gradients", "message": f"Potentially exploding gradient (norm {data.get('norm'):.2f}) at step {step} in {layer}"})
+                    alerts.append(
+                        {
+                            "severity": "warning",
+                            "title": "Large Gradients",
+                            "message": f"Potentially exploding gradient (norm {data.get('norm'):.2f}) at step {step} in {layer}",
+                        }
+                    )
                     break
-        
+
         return {"run_id": run_id, "alerts": alerts}
 
     @app.get("/api/runs/{run_id}/checkpoints")
@@ -208,8 +255,15 @@ def create_app(store):
         threshold = max_mean * 0.01
 
         candidates = sorted(
-            [{"layer": layer, "mean_grad_norm": round(norm, 8), "relative_norm": round(norm / max(max_mean, 1e-12), 6)}
-             for layer, norm in mean_norms.items() if norm < threshold],
+            [
+                {
+                    "layer": layer,
+                    "mean_grad_norm": round(norm, 8),
+                    "relative_norm": round(norm / max(max_mean, 1e-12), 6),
+                }
+                for layer, norm in mean_norms.items()
+                if norm < threshold
+            ],
             key=lambda x: x["mean_grad_norm"],
         )
 
@@ -237,9 +291,7 @@ def create_app(store):
             "# Option C: Do nothing (keep all layers trainable — current state)",
         ]
 
-        tensorflow_lines = [
-            "# ❄️ GradGlass: Freeze layers with low gradient activity (Keras/TF)",
-        ]
+        tensorflow_lines = ["# ❄️ GradGlass: Freeze layers with low gradient activity (Keras/TF)"]
         for c in candidates[:8]:
             tensorflow_lines.append(f"# model.get_layer('{c['layer']}').trainable = False")
         tensorflow_lines += ["", "# Or do nothing to keep all layers trainable"]
@@ -250,7 +302,9 @@ def create_app(store):
             "total_candidates": len(candidates),
             "pytorch_code": "\n".join(pytorch_lines),
             "tensorflow_code": "\n".join(tensorflow_lines),
-            "message": f"Found {len(candidates)} freeze candidate(s) out of {len(mean_norms)} layers." if candidates else "All layers are receiving meaningful gradients — no freeze candidates.",
+            "message": f"Found {len(candidates)} freeze candidate(s) out of {len(mean_norms)} layers."
+            if candidates
+            else "All layers are receiving meaningful gradients — no freeze candidates.",
         }
 
     @app.get("/api/runs/{run_id}/architecture/diff")
@@ -306,6 +360,13 @@ def create_app(store):
         dist_info = store.get_distributed_info(run_id)
         ranks = store.list_ranks(run_id)
         return {"run_id": run_id, "distributed_index": dist_info, "ranks": ranks}
+
+    @app.get("/api/runs/{run_id}/infrastructure")
+    async def get_infrastructure(run_id):
+        meta = store.get_run_metadata(run_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return collect_infrastructure_telemetry(store, run_id)
 
     @app.get("/api/runs/{run_id}/eval")
     async def get_eval_metrics(run_id):
@@ -496,9 +557,9 @@ def find_free_port():
         return s.getsockname()[1]
 
 
-def _wait_for_server(host: str, port: int, timeout: float = 10.0, interval: float = 0.05) -> bool:
-    """Poll until the server's TCP port accepts connections or timeout expires."""
+def _wait_for_server(host: str, port: int, timeout: float = 10.0, interval: float = 0.05):
     import time as _time
+
     deadline = _time.monotonic() + timeout
     while _time.monotonic() < deadline:
         try:

@@ -1,12 +1,39 @@
 from __future__ import annotations
 
+import os
 import statistics
 import time
 from typing import Any, Optional, Union
 
 Number = Union[float, int]
 Series = list[list[float]]
-TERMINAL_STATUSES = {"complete", "completed", "finished"}
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+ACTIVE_STATUSES = {"idle", "starting", "running", "paused"}
+
+RUN_STATUS_ALIASES = {
+    "": "idle",
+    "unknown": "idle",
+    "idle": "idle",
+    "starting": "starting",
+    "initializing": "starting",
+    "running": "running",
+    "run": "running",
+    "paused": "paused",
+    "pause": "paused",
+    "complete": "completed",
+    "completed": "completed",
+    "finished": "completed",
+    "failed": "failed",
+    "error": "failed",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+    "stopped": "cancelled",
+    "stop": "cancelled",
+    "interrupted": "interrupted",
+    "abort": "interrupted",
+    "aborted": "interrupted",
+    "terminated": "interrupted",
+}
 
 
 class BaseExperimentAdapter:
@@ -55,7 +82,7 @@ class BaseExperimentAdapter:
         self.now_ts = float(now_ts) if now_ts is not None else time.time()
 
     def build_snapshot(self) -> dict[str, Any]:
-        status = self._resolve_status()
+        status, status_reason, process_alive = self._resolve_status()
 
         current_step = self._resolve_current_step()
         total_steps, total_steps_source = self._resolve_total_steps(current_step)
@@ -86,6 +113,7 @@ class BaseExperimentAdapter:
             "run_id": self.run_id,
             "framework": self.framework,
             "status": status,
+            "status_reason": status_reason,
             "health_state": health_state,
             "current_step": current_step,
             "total_steps": total_steps,
@@ -98,6 +126,8 @@ class BaseExperimentAdapter:
             "val_loss_history": val_loss,
             "lr_history": lr_history,
             "heartbeat_ts": heartbeat_ts,
+            "process_alive": process_alive,
+            "last_event": str(self.runtime_state.get("last_event", "") or "").strip().lower() or None,
             "resource_tracking_available": resource_tracking_available,
             "monitor_enabled": monitor_enabled,
             "latest_loss": latest_loss,
@@ -106,11 +136,40 @@ class BaseExperimentAdapter:
             "updated_at": self.now_ts,
         }
 
-    def _resolve_status(self) -> str:
-        runtime_status = str(self.runtime_state.get("status", "")).strip().lower()
-        if runtime_status:
-            return runtime_status
-        return str(self.metadata.get("status", "unknown")).strip().lower() or "unknown"
+    def _resolve_status(self) -> tuple[str, Optional[str], Optional[bool]]:
+        runtime_status = _normalize_run_status(self.runtime_state.get("status"))
+        metadata_status = _normalize_run_status(self.metadata.get("status"))
+        status = runtime_status or metadata_status or "idle"
+
+        if self.runtime_state.get("fatal_exception"):
+            return "failed", "fatal exception recorded in runtime state", _is_pid_alive(self.runtime_state)
+
+        if status in TERMINAL_STATUSES:
+            return status, None, _is_pid_alive(self.runtime_state)
+
+        last_event = str(self.runtime_state.get("last_event", "") or "").strip().lower()
+        if last_event in {"cancel", "cancelled", "manual_stop", "keyboard_interrupt", "ctrl_c"}:
+            return "cancelled", "explicit stop event recorded", _is_pid_alive(self.runtime_state)
+        if last_event in {"interrupt", "interrupted", "abort", "aborted", "terminated"}:
+            return "interrupted", "interrupt event recorded", _is_pid_alive(self.runtime_state)
+        if last_event in {"fail", "exception", "crash"}:
+            return "failed", "failure event recorded", _is_pid_alive(self.runtime_state)
+
+        process_alive = _is_pid_alive(self.runtime_state)
+        heartbeat_ts = self._resolve_heartbeat()
+        cadence = _metric_cadence_seconds(self.metrics)
+        if cadence is None:
+            cadence = 2.0 if self._resolve_current_step() > 0 else 5.0
+        stale_after = max(30.0, cadence * 8.0)
+        heartbeat_stale = heartbeat_ts is None or (self.now_ts - heartbeat_ts) >= stale_after
+
+        if status in ACTIVE_STATUSES:
+            if process_alive is False:
+                return "interrupted", "training process is no longer alive", process_alive
+            if heartbeat_stale and process_alive in {False, None}:
+                return "interrupted", "heartbeat is stale and process is unreachable", process_alive
+
+        return status, None, process_alive
 
     def _resolve_current_step(self) -> int:
         runtime_step = _safe_int(self.runtime_state.get("current_step"))
@@ -144,7 +203,8 @@ class BaseExperimentAdapter:
 
         # If this run is already complete and we do not have a better estimate,
         # current step is the only truthful total we can report.
-        if self._resolve_status() in TERMINAL_STATUSES and current_step > 0:
+        status, _, _ = self._resolve_status()
+        if status == "completed" and current_step > 0:
             return current_step, "completion_fallback"
         return None, "unknown"
 
@@ -229,10 +289,14 @@ class BaseExperimentAdapter:
         return [[1.0, static_lr], [float(current_step), static_lr]]
 
     def _estimate_eta(self, *, status: str, current_step: int, total_steps: Optional[int]) -> tuple[Optional[float], Optional[str]]:
-        if status in TERMINAL_STATUSES:
+        if status == "completed":
             return 0.0, None
         if status == "failed":
             return None, "ETA unavailable (run failed)"
+        if status == "cancelled":
+            return None, "ETA unavailable (run cancelled)"
+        if status == "interrupted":
+            return None, "ETA unavailable (run interrupted)"
         if total_steps is None:
             return None, "ETA unavailable (total steps unknown)"
         if current_step <= 0:
@@ -261,8 +325,12 @@ class BaseExperimentAdapter:
         if status == "failed":
             return "FAILED"
 
-        if status in TERMINAL_STATUSES:
+        if status == "completed":
             return "HEALTHY"
+        if status == "cancelled":
+            return "WARNING"
+        if status == "interrupted":
+            return "STALLED"
 
         if heartbeat_ts is None:
             return "WARNING"
@@ -536,6 +604,52 @@ def build_overview_snapshot(
         now_ts=now_ts,
     )
     return adapter.build_snapshot()
+
+
+def normalize_run_status(status: Any) -> str:
+    """Public status normalizer used by APIs/UI-facing payloads."""
+    return _normalize_run_status(status)
+
+
+def _normalize_run_status(status: Any) -> str:
+    raw = str(status if status is not None else "").strip().lower()
+    if raw in RUN_STATUS_ALIASES:
+        return RUN_STATUS_ALIASES[raw]
+    return raw or "idle"
+
+
+def _is_pid_alive(runtime_state: dict[str, Any]) -> Optional[bool]:
+    pid = _safe_int(runtime_state.get("training_pid"))
+    if pid is None or pid <= 0:
+        return None
+
+    expected_start = _safe_float(runtime_state.get("training_process_start_time"))
+
+    try:
+        import psutil  # type: ignore
+
+        proc = psutil.Process(pid)
+        if expected_start is not None:
+            try:
+                if abs(float(proc.create_time()) - expected_start) > 2.0:
+                    return False
+            except Exception:
+                pass
+        return bool(proc.is_running()) and proc.status() != getattr(psutil, "STATUS_ZOMBIE", "zombie")
+    except ImportError:
+        pass
+    except Exception:
+        return False
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return None
 
 
 def _safe_float(value: Any) -> Optional[float]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 import json
+import os
+import socket
 import time
 import uuid
 import threading
@@ -38,6 +40,9 @@ class Run:
         self.grad_buffer = {}
         self.lock = threading.Lock()
         self._git_commit = self._capture_git_commit()
+        self._training_pid = int(os.getpid())
+        self._training_process_start_time = self._get_process_start_time()
+        self._training_hostname = socket.gethostname()
         self.write_metadata(status="running")
         self._write_runtime_state(
             status="running",
@@ -48,6 +53,7 @@ class Run:
             total_steps=infer_total_steps_from_config(self.options),
             fatal_exception=None,
         )
+        self.devices = {}
 
     @staticmethod
     def _capture_git_commit() -> Optional[str]:
@@ -60,6 +66,15 @@ class Run:
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _get_process_start_time() -> Optional[float]:
+        try:
+            import psutil  # type: ignore
+
+            return float(psutil.Process(os.getpid()).create_time())
+        except Exception:
+            return None
 
     @classmethod
     def from_existing(cls, run_id, store):
@@ -84,6 +99,9 @@ class Run:
         run.grad_buffer = {}
         run.lock = threading.Lock()
         run._git_commit = None  # not needed for read-only access to existing runs
+        run._training_pid = int(os.getpid())
+        run._training_process_start_time = run._get_process_start_time()
+        run._training_hostname = socket.gethostname()
         meta_path = run.run_dir / "metadata.json"
         if meta_path.exists():
             with open(meta_path) as f:
@@ -148,10 +166,7 @@ class Run:
             return None
         try:
             proc = psutil.Process()
-            return {
-                "rss_bytes": int(proc.memory_info().rss),
-                "cpu_percent": float(proc.cpu_percent(interval=None)),
-            }
+            return {"rss_bytes": int(proc.memory_info().rss), "cpu_percent": float(proc.cpu_percent(interval=None))}
         except Exception:
             return None
 
@@ -171,9 +186,14 @@ class Run:
         with self.lock:
             state = self._read_runtime_state()
             state["heartbeat_ts"] = ts
+            state["last_event_ts"] = ts
             state["current_step"] = int(current_step if current_step is not None else self.step)
             if self.start_time is not None:
                 state.setdefault("start_time_epoch", float(self.start_time))
+            state["training_pid"] = int(self._training_pid)
+            state["training_hostname"] = self._training_hostname
+            if self._training_process_start_time is not None:
+                state["training_process_start_time"] = float(self._training_process_start_time)
             if event is not None:
                 state["last_event"] = event
             if status is not None:
@@ -377,13 +397,65 @@ class Run:
 
     def fail(self, error: Any, open=False, analyze=False, print_summary=True):
         self.flush()
-        self._write_runtime_state(
-            status="failed",
-            event="fail",
-            current_step=self.step,
-            fatal_exception=error,
-        )
+        self._write_runtime_state(status="failed", event="fail", current_step=self.step, fatal_exception=error)
         self.write_metadata(status="failed")
+        if hasattr(self, "engine"):
+            self.engine.cleanup()
+        report = None
+        if analyze:
+            report = self.analyze(print_summary=print_summary)
+        if open:
+            if self.server_port is not None:
+                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
+            else:
+                self.open()
+        return report
+
+    def cancel(self, reason: Optional[str] = None, open=False, analyze=False, print_summary=True):
+        self.flush()
+        event = "cancel"
+        cancel_reason = reason or "manual stop"
+        self._write_runtime_state(
+            status="cancelled",
+            event=event,
+            current_step=self.step,
+            fatal_exception=None,
+        )
+        with self.lock:
+            state = self._read_runtime_state()
+            state["cancel_reason"] = str(cancel_reason)
+            with open(self.runtime_state_file, "w") as f:
+                json.dump(state, f, indent=2, default=str)
+
+        self.write_metadata(status="cancelled")
+        if hasattr(self, "engine"):
+            self.engine.cleanup()
+        report = None
+        if analyze:
+            report = self.analyze(print_summary=print_summary)
+        if open:
+            if self.server_port is not None:
+                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
+            else:
+                self.open()
+        return report
+
+    def interrupt(self, reason: Optional[str] = None, open=False, analyze=False, print_summary=True):
+        self.flush()
+        interrupt_reason = reason or "training interrupted"
+        self._write_runtime_state(
+            status="interrupted",
+            event="interrupt",
+            current_step=self.step,
+            fatal_exception=None,
+        )
+        with self.lock:
+            state = self._read_runtime_state()
+            state["interrupt_reason"] = str(interrupt_reason)
+            with open(self.runtime_state_file, "w") as f:
+                json.dump(state, f, indent=2, default=str)
+
+        self.write_metadata(status="interrupted")
         if hasattr(self, "engine"):
             self.engine.cleanup()
         report = None
@@ -442,10 +514,7 @@ class Run:
                 url = f"http://localhost:{self.server_port}/?run={self.run_id}"
                 webbrowser.open(url)
             self._write_runtime_state(
-                event="monitor_reuse",
-                monitor_enabled=True,
-                monitor_port=self.server_port,
-                current_step=self.step,
+                event="monitor_reuse", monitor_enabled=True, monitor_port=self.server_port, current_step=self.step
             )
             return self.server_port
 
@@ -453,10 +522,7 @@ class Run:
         actual_port = start_server(app, port=port)
         self.server_port = actual_port
         self._write_runtime_state(
-            event="monitor_start",
-            monitor_enabled=True,
-            monitor_port=actual_port,
-            current_step=self.step,
+            event="monitor_start", monitor_enabled=True, monitor_port=actual_port, current_step=self.step
         )
         url = f"http://localhost:{actual_port}/?run={self.run_id}"
         print(f"\U0001f52c GradGlass live monitor: {url}")

@@ -13,15 +13,25 @@ export function SeverityBadge({ severity }) {
 }
 
 export function StatusBadge({ status }) {
+  const normalized = (status || '').toString().trim().toLowerCase()
   const classes = {
     running: 'text-blue-400 bg-blue-400/10 border-blue-400/30',
+    starting: 'text-sky-400 bg-sky-400/10 border-sky-400/30',
+    paused: 'text-amber-400 bg-amber-400/10 border-amber-400/30',
+    idle: 'text-slate-400 bg-slate-400/10 border-slate-400/30',
     complete: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30',
+    completed: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30',
     failed: 'text-red-400 bg-red-400/10 border-red-400/30',
+    interrupted: 'text-orange-400 bg-orange-400/10 border-orange-400/30',
+    cancelled: 'text-rose-400 bg-rose-400/10 border-rose-400/30',
   }
+  const display = normalized.replaceAll('_', ' ')
   return (
-    <span className={`badge ${classes[status] || 'text-slate-400 bg-slate-400/10 border-slate-400/30'}`}>
-      {status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mr-1.5" />}
-      {status}
+    <span className={`badge ${classes[normalized] || 'text-slate-400 bg-slate-400/10 border-slate-400/30'}`}>
+      {(normalized === 'running' || normalized === 'starting') && (
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mr-1.5" />
+      )}
+      {display || 'unknown'}
     </span>
   )
 }

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from gradglass.artifacts import ArtifactStore
 from gradglass.server import create_app
+import gradglass.telemetry as telemetry
 
 
 @pytest.fixture
@@ -92,3 +93,78 @@ def test_stream_emits_metrics_and_overview_updates(tmp_store):
 
         assert "metrics_update" in seen
         assert "overview_update" in seen
+
+
+def test_infrastructure_endpoint_returns_metric_payload(tmp_store):
+    run_id = "infra-api-run"
+    _seed_run(tmp_store, run_id)
+    app = create_app(tmp_store)
+
+    client = TestClient(app)
+    response = client.get(f"/api/runs/{run_id}/infrastructure")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == run_id
+    assert payload["mode"] in {"standalone", "distributed"}
+    assert "collected_at" in payload
+    assert "metrics" in payload
+    assert "live_guard" in payload
+    assert set(payload["live_guard"].keys()) == {
+        "ok",
+        "reasons",
+        "collected_at",
+        "server_pid",
+        "hostname",
+        "run_id",
+    }
+    assert isinstance(payload["live_guard"]["ok"], bool)
+    assert isinstance(payload["live_guard"]["reasons"], list)
+    assert payload["live_guard"]["run_id"] == run_id
+
+    expected_metrics = {
+        "cluster_nodes",
+        "system_cpu",
+        "system_ram",
+        "power_draw",
+        "multi_gpu_compute_utilization",
+        "gpu_memory_fragmentation",
+    }
+    assert set(payload["metrics"].keys()) == expected_metrics
+    for metric in payload["metrics"].values():
+        assert telemetry.REQUIRED_METRIC_KEYS.issubset(metric.keys())
+
+    assert "telemetry_v2" in payload
+    v2 = payload["telemetry_v2"]
+    assert "external_usage" in v2
+    assert "graph_hints" in v2
+    assert v2["graph_hints"]["preferred_layout"] in {"host_process_first", "accelerator_first"}
+    assert isinstance(v2["graph_hints"]["run_terminal"], bool)
+    assert isinstance(v2["graph_hints"]["throughput_warmup"], bool)
+
+
+def test_infrastructure_endpoint_survives_partial_probe_failure(tmp_store, monkeypatch):
+    run_id = "infra-partial-failure-run"
+    _seed_run(tmp_store, run_id)
+    app = create_app(tmp_store)
+
+    def _boom():
+        raise RuntimeError("forced cpu failure")
+
+    monkeypatch.setattr(telemetry, "query_system_cpu", _boom)
+
+    client = TestClient(app)
+    response = client.get(f"/api/runs/{run_id}/infrastructure")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metrics"]["system_cpu"]["status"] == "error"
+    assert "forced cpu failure" in (payload["metrics"]["system_cpu"]["error"] or "")
+
+
+def test_infrastructure_endpoint_returns_404_for_unknown_run(tmp_store):
+    app = create_app(tmp_store)
+    client = TestClient(app)
+
+    response = client.get("/api/runs/missing-run/infrastructure")
+    assert response.status_code == 404

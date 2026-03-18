@@ -237,28 +237,28 @@ Hardware utilization overview for distributed training. Answers:
 
 | Source | Details |
 |---|---|
-| *(none)* | This page makes **no API calls**. |
+| `GET /api/runs/:runId/infrastructure` | Returns `{ run_id, mode, metrics, gpu_devices, collected_at }`, where `metrics` includes `cluster_nodes`, `system_cpu`, `system_ram`, `power_draw`, `multi_gpu_compute_utilization`, and `gpu_memory_fragmentation`. |
 
 ### Key Interactions
 
-- **KPI tiles** — four static values: Cluster Nodes (`1 / 1`), System CPU (`34%`),
-  System RAM (`124 / 256 GB`), Power Draw (`1,420 W`).
-- **Multi-GPU Compute Utilization chart** — time series for GPU 0–3, values in the 80–100%
-  range generated with `Math.random()` at render.
-- **GPU Memory Fragmentation chart** — stacked horizontal bar per GPU showing Allocated,
-  Reserved, and Free VRAM (values are hardcoded: ~72 GB allocated out of 80 GB).
-- **NCCL Ring / Network Bandwidth chart** — single area series representing AllReduce
-  throughput, generated with `Math.random()`.
+- **KPI tiles** — live Cluster Nodes, System CPU, System RAM, and Power Draw metrics from backend probes.
+- **GPU Compute Utilization chart** — rolling live history built from 2s polling; supports no-GPU, single-GPU, and multi-GPU states.
+- **GPU Memory Fragmentation chart** — rolling live history when allocator counters are available; otherwise explicit unavailable state.
+- **Transparency-first diagnostics** — each metric/section includes a debug disclosure with source, probe function, command/API call, error reason, and last-updated time.
 
 ### Empty / Error / Loading Behavior
 
-No loading/error states — this page renders immediately on mount.
+| State | Display |
+|---|---|
+| Initial load | "Loading infrastructure telemetry..." |
+| Poll failure | Inline error banner plus last successful telemetry snapshot (if present) |
+| Metric unavailable/error | Explicit "Unavailable" UI with function and probe command |
 
 ### Data Origin
 
-⚠️ **Entirely mock / demo data.** All chart values and KPI tiles are hardcoded constants or
-`Math.random()` calls in the component. There is no backend integration for infrastructure
-telemetry in the current build.
+✅ **Backend-driven live telemetry.** Infrastructure values come from runtime probes via
+`/api/runs/:runId/infrastructure`; unsupported probes are surfaced as `unavailable`/`error`
+with retrieval metadata instead of placeholder numbers.
 
 ---
 
