@@ -159,6 +159,24 @@ class Run:
             return {}
 
     @staticmethod
+    def _atomic_write_json(path: Path, payload: Any) -> None:
+        """Atomically persist JSON payload to avoid partial-read windows."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
+        try:
+            with open(tmp_path, "w") as f:
+                json.dump(payload, f, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+
+    @staticmethod
     def _collect_resource_snapshot() -> Optional[dict[str, Any]]:
         try:
             import psutil
@@ -221,8 +239,7 @@ class Run:
             else:
                 state.setdefault("resource_tracking_available", False)
 
-            with open(self.runtime_state_file, "w") as f:
-                json.dump(state, f, indent=2, default=str)
+            self._atomic_write_json(self.runtime_state_file, state)
 
     def watch(
         self,
@@ -246,6 +263,10 @@ class Run:
             "every": every,
         }
         self.framework = self.detectframework(model)
+        if self.framework not in ("pytorch", "tensorflow"):
+            raise RuntimeError(
+                "Unsupported model framework. GradGlass currently supports only PyTorch and TensorFlow/Keras."
+            )
         self.write_metadata()
         self._write_runtime_state(
             status="running",
@@ -254,21 +275,16 @@ class Run:
             total_steps=self._infer_total_steps_from_options_or_model(),
             fatal_exception=None,
         )
-        if self.framework in ("sklearn", "xgboost", "lightgbm"):
-            from gradglass.capture import SklearnCaptureAdapter
+        from gradglass.capture import CaptureEngine
 
-            self.engine = SklearnCaptureAdapter(model=model, run_dir=self.run_dir, config=self.capture_config)
-        else:
-            from gradglass.capture import CaptureEngine
-
-            self.engine = CaptureEngine(
-                model=model,
-                optimizer=optimizer,
-                framework=self.framework,
-                run_dir=self.run_dir,
-                config=self.capture_config,
-            )
-            self.engine.attach_hooks()
+        self.engine = CaptureEngine(
+            model=model,
+            optimizer=optimizer,
+            framework=self.framework,
+            run_dir=self.run_dir,
+            config=self.capture_config,
+        )
+        self.engine.attach_hooks()
         self.engine.extract_architecture()
         monitor_enabled = bool(self.options.get("monitor", False)) if monitor is None else bool(monitor)
         resolved_monitor_port = self.options.get("port", 0) if monitor_port is None else monitor_port
@@ -289,45 +305,12 @@ class Run:
                 return "pytorch"
             if "keras" in tn or "tensorflow" in tn:
                 return "tensorflow"
-            if "xgboost" in tn:
-                return "xgboost"
-            if "lightgbm" in tn:
-                return "lightgbm"
-            if "sklearn" in tn:
-                return "sklearn"
-        try:
-            from sklearn.base import BaseEstimator
-
-            if isinstance(model, BaseEstimator):
-                return "sklearn"
-        except ImportError:
-            pass
         return "unknown"
 
     def _infer_total_steps_from_options_or_model(self) -> Optional[int]:
         config_total = infer_total_steps_from_config(self.options)
         if config_total and config_total > 0:
             return config_total
-
-        if self.model is None:
-            return None
-
-        for key in ("n_estimators", "max_iter", "num_iterations"):
-            value = _safe_positive_int(getattr(self.model, key, None))
-            if value is not None:
-                return value
-
-        get_params = getattr(self.model, "get_params", None)
-        if callable(get_params):
-            try:
-                params = get_params()
-            except Exception:
-                params = {}
-            if isinstance(params, dict):
-                for key in ("n_estimators", "max_iter", "num_iterations"):
-                    value = _safe_positive_int(params.get(key))
-                    if value is not None:
-                        return value
 
         return None
 
@@ -424,8 +407,7 @@ class Run:
         with self.lock:
             state = self._read_runtime_state()
             state["cancel_reason"] = str(cancel_reason)
-            with open(self.runtime_state_file, "w") as f:
-                json.dump(state, f, indent=2, default=str)
+            self._atomic_write_json(self.runtime_state_file, state)
 
         self.write_metadata(status="cancelled")
         if hasattr(self, "engine"):
@@ -452,8 +434,7 @@ class Run:
         with self.lock:
             state = self._read_runtime_state()
             state["interrupt_reason"] = str(interrupt_reason)
-            with open(self.runtime_state_file, "w") as f:
-                json.dump(state, f, indent=2, default=str)
+            self._atomic_write_json(self.runtime_state_file, state)
 
         self.write_metadata(status="interrupted")
         if hasattr(self, "engine"):
@@ -614,115 +595,10 @@ class Run:
         return GradGlassKerasCallback(run=self)
 
     def fit(self, X, y=None, X_val=None, y_val=None, eval_set=None, **fit_params):
-        if not hasattr(self, "engine"):
-            raise RuntimeError("Call run.watch(model) before run.fit().")
-        if self.framework not in ("sklearn", "xgboost", "lightgbm"):
-            raise RuntimeError(
-                "run.fit() is intended for sklearn / XGBoost / LightGBM models. "
-                "For PyTorch or Keras use a training loop with run.log()."
-            )
-
-        kw = dict(fit_params)
-        # Only pass eval_set to frameworks that support it (XGBoost / LightGBM)
-        if self.framework in ("xgboost", "lightgbm"):
-            if eval_set is not None:
-                kw.setdefault("eval_set", eval_set)
-            elif X_val is not None and y_val is not None:
-                kw.setdefault("eval_set", [(X_val, y_val)])
-
-        t0 = time.time()
-        try:
-            self.model.fit(X, y, **kw)
-        except TypeError as exc:
-            if "callbacks" in str(exc) and "callbacks" in kw:
-                # Older XGBoost / LightGBM sklearn API does not accept callbacks= in fit().
-                # Strip it and retry; per-round metrics will be recovered from evals_result_.
-                kw.pop("callbacks")
-                self.model.fit(X, y, **kw)
-            else:
-                raise
-        duration = time.time() - t0
-
-        # For XGBoost / LightGBM: if no per-round metrics were written by a callback
-        # (step is still 0), recover them from the model's evals_result.
-        if self.framework in ("xgboost", "lightgbm") and self.step == 0:
-            evals = None
-            try:
-                if hasattr(self.model, "evals_result_"):
-                    evals = self.model.evals_result_
-                elif callable(getattr(self.model, "evals_result", None)):
-                    evals = self.model.evals_result()
-            except Exception:
-                pass
-            if evals:
-                rounds = max((len(vals) for ds_m in evals.values() for vals in ds_m.values()), default=0)
-                for r in range(rounds):
-                    self.step = r + 1
-                    rm = {"step": self.step, "timestamp": time.time()}
-                    for ds, dsm in evals.items():
-                        for mn, vals in dsm.items():
-                            rm[f"{ds}_{mn}".replace("-", "_")] = float(vals[r])
-                    with open(self.metrics_file, "a") as f:
-                        f.write(json.dumps(rm, default=json_default) + "\n")
-
-        self.step += 1
-        entry = {"step": self.step, "fit_duration_s": round(duration, 3)}
-        estimator_type = getattr(self.model, "_estimator_type", "unknown")
-        metric = "accuracy" if estimator_type == "classifier" else "r2"
-
-        if hasattr(self.model, "score") and y is not None:
-            try:
-                entry[f"train_{metric}"] = round(float(self.model.score(X, y)), 5)
-            except Exception:
-                pass
-        if X_val is not None and y_val is not None and hasattr(self.model, "score"):
-            try:
-                entry[f"val_{metric}"] = round(float(self.model.score(X_val, y_val)), 5)
-            except Exception:
-                pass
-
-        with open(self.metrics_file, "a") as f:
-            f.write(json.dumps(entry, default=json_default) + "\n")
-
-        if hasattr(self.engine, "capture_post_fit"):
-            self.engine.capture_post_fit(step=self.step)
-        self.engine.save_checkpoint(step=self.step, tag="post_fit")
-
-        X_for_eval = X_val if X_val is not None else X
-        y_for_eval = y_val if y_val is not None else y
-        if y_for_eval is not None and hasattr(self.model, "predict"):
-            try:
-                y_pred_vals = self.model.predict(X_for_eval)
-                if hasattr(self.model, "predict_proba"):
-                    try:
-                        y_proba = self.model.predict_proba(X_for_eval)
-                        self.engine.log_batch_predictions(
-                            step=self.step, x=X_for_eval, y=y_for_eval, y_pred=y_proba, loss=None
-                        )
-                    except Exception:
-                        self.engine.log_batch_predictions(
-                            step=self.step, x=X_for_eval, y=y_for_eval, y_pred=y_pred_vals, loss=None
-                        )
-                else:
-                    self.engine.log_batch_predictions(
-                        step=self.step, x=X_for_eval, y=y_for_eval, y_pred=y_pred_vals, loss=None
-                    )
-            except Exception:
-                pass
-        self._write_runtime_state(event="fit", current_step=self.step)
-
-        return self.model
-
-    def xgboost_callback(self):
-
-        from gradglass.capture import XGBoostGradGlassCallback
-
-        return XGBoostGradGlassCallback(self).get()
-
-    def lightgbm_callback(self):
-        from gradglass.capture import LightGBMGradGlassCallback
-
-        return LightGBMGradGlassCallback(self)
+        raise RuntimeError(
+            "run.fit() is not supported in the PyTorch/TensorFlow-only release. "
+            "For PyTorch, use your training loop with run.log(); for TensorFlow/Keras, use run.keras_callback()."
+        )
 
     def get_lr(self):
         if self.optimizer is None:
@@ -748,13 +624,3 @@ def json_default(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     return str(obj)
-
-
-def _safe_positive_int(value: Any) -> Optional[int]:
-    if value is None:
-        return None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None

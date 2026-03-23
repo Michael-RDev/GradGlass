@@ -16,10 +16,6 @@ import 'reactflow/dist/style.css'
 import { fetchArchitecture } from '../api'
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/ui'
 import { Network, Search, Edit3, Save, ChevronDown, ChevronRight } from 'lucide-react'
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell,
-} from 'recharts'
 
 // ─────────────────────────────────────────────────────────────────
 // Category colours
@@ -59,132 +55,6 @@ const CAT = {
   },
 }
 const getCAT = (cat) => CAT[cat] || CAT.model
-
-// ─────────────────────────────────────────────────────────────────
-// Boosting / tree-model view (unchanged)
-// ─────────────────────────────────────────────────────────────────
-const FW_COLORS = {
-  xgboost:  { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/30' },
-  lightgbm: { bg: 'bg-green-500/10',  text: 'text-green-400',  border: 'border-green-500/30'  },
-  sklearn:  { bg: 'bg-blue-500/10',   text: 'text-blue-400',   border: 'border-blue-500/30'   },
-}
-
-function BoostingView({ architecture }) {
-  const layer       = architecture?.layers?.[0] || {}
-  const params      = layer.params || {}
-  const importances = architecture?.feature_importances || []
-  const treesInfo   = architecture?.trees_info || {}
-  const framework   = architecture?.framework || 'sklearn'
-  const fwColor     = FW_COLORS[framework] || FW_COLORS.sklearn
-
-  const nEstimators  = treesInfo.num_trees ?? params.n_estimators ?? params.num_iterations ?? '?'
-  const maxDepth     = params.max_depth ?? params.max_leaves ?? '?'
-  const learningRate = params.learning_rate ?? params.eta ?? '?'
-  const subsample    = params.subsample ?? params.colsample_bytree ?? '?'
-
-  const chartData = importances
-    .map((v, i) => ({ name: `f${i}`, pct: Math.round(v * 10000) / 100 }))
-    .sort((a, b) => b.pct - a.pct)
-    .slice(0, 20)
-
-  const visCount = Math.min(Number(nEstimators) || 0, 60)
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">
-          Ensemble Architecture
-        </h1>
-        <div className="flex items-center gap-2 mt-2">
-          <span className={`text-xs px-2 py-0.5 rounded-md font-mono font-medium border ${fwColor.bg} ${fwColor.text} ${fwColor.border}`}>
-            {framework}
-          </span>
-          <span className="text-xs text-slate-400">{layer.type}</span>
-          <span className="text-slate-600">•</span>
-          <span className="text-xs text-slate-400">{layer.estimator_type}</span>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Trees',         value: nEstimators },
-          { label: 'Max Depth',     value: maxDepth },
-          { label: 'Learning Rate', value: learningRate },
-          { label: 'Subsample',     value: subsample },
-        ].map(({ label, value }) => (
-          <div key={label} className="card text-center py-5">
-            <div className="text-2xl font-bold font-mono text-white">{String(value)}</div>
-            <div className="text-xs text-slate-500 mt-1">{label}</div>
-          </div>
-        ))}
-      </div>
-      {visCount > 0 && (
-        <div className="card">
-          <h3 className="text-sm font-medium text-slate-400 mb-3 uppercase tracking-wider">
-            Ensemble Forest — {nEstimators} Trees
-          </h3>
-          <div className="flex flex-wrap gap-1 mb-4">
-            {Array.from({ length: visCount }).map((_, i) => (
-              <span key={i} className="text-lg leading-none opacity-80 hover:opacity-100 transition-opacity" title={`Tree ${i + 1}`}>
-                🌲
-              </span>
-            ))}
-            {Number(nEstimators) > visCount && (
-              <span className="text-xs text-slate-500 self-end ml-1">
-                +{Number(nEstimators) - visCount} more
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-      {chartData.length > 0 && (
-        <div className="card">
-          <h3 className="text-sm font-medium text-slate-400 mb-4 uppercase tracking-wider">
-            Feature Importances (top {chartData.length})
-          </h3>
-          <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 26)}>
-            <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 20, top: 4, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-              <XAxis type="number" stroke="#475569" tick={{ fontSize: 11 }} tickFormatter={v => `${v}%`} domain={[0, 'auto']} />
-              <YAxis type="category" dataKey="name" stroke="#475569" tick={{ fontSize: 11 }} width={40} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }}
-                formatter={v => [`${v}%`, 'Importance']}
-              />
-              <Bar dataKey="pct" radius={[0, 4, 4, 0]}>
-                {chartData.map((_, i) => (
-                  <Cell key={i} fill={i === 0 ? '#f59e0b' : i < 5 ? '#fb923c' : '#475569'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-      {treesInfo.tree_dump_sample?.length > 0 && (
-        <div className="card">
-          <h3 className="text-sm font-medium text-slate-400 mb-3 uppercase tracking-wider">
-            Tree Structure — Tree 0
-          </h3>
-          <pre className="text-xs font-mono text-slate-300 bg-slate-950 p-4 rounded-lg overflow-x-auto border border-slate-800 leading-relaxed whitespace-pre">
-            {treesInfo.tree_dump_sample[0]}
-          </pre>
-        </div>
-      )}
-      {Object.keys(params).length > 0 && (
-        <div className="card">
-          <h3 className="text-sm font-medium text-slate-400 mb-4 uppercase tracking-wider">All Hyperparameters</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-            {Object.entries(params).map(([key, val]) => (
-              <div key={key} className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
-                <div className="text-xs text-slate-500 mb-1">{key}</div>
-                <div className="font-mono text-sm text-slate-200 truncate" title={String(val)}>{String(val)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────
 // ReactFlow node types
@@ -642,16 +512,6 @@ export default function ArchitectureGraph() {
     )
   }
 
-  // Route boosting models to their own view
-  const isBoosting =
-    architecture?.is_boosting ||
-    ['xgboost', 'lightgbm'].includes(architecture?.framework) ||
-    (architecture?.framework === 'sklearn' &&
-      /forest|boost|tree|gradient|ada|bagging|extra/i.test(
-        architecture?.layers?.[0]?.type || ''
-      ))
-  if (isBoosting) return <BoostingView architecture={architecture} />
-
   return (
     <div className="flex flex-col h-[calc(100vh-100px)]">
       {/* Header */}
@@ -816,4 +676,3 @@ export default function ArchitectureGraph() {
     </div>
   )
 }
-

@@ -11,9 +11,9 @@ import gradglass.experiment_tracking as tracking
 def test_infer_total_steps_from_config():
     assert infer_total_steps_from_config({"total_steps": 400}) == 400
     assert infer_total_steps_from_config({"epochs": 3, "steps_per_epoch": 100}) == 300
-    assert infer_total_steps_from_config({"n_estimators": 250}) == 250
+    assert infer_total_steps_from_config({"max_steps": 250}) == 250
     assert infer_total_steps_from_config({"max_iter": 75}) == 75
-    assert infer_total_steps_from_config({"num_iterations": 80}) == 80
+    assert infer_total_steps_from_config({"num_train_steps": 80}) == 80
     assert infer_total_steps_from_config({}) is None
 
 
@@ -294,51 +294,55 @@ def test_health_state_transitions():
     assert failed["health_state"] == "FAILED"
 
 
-def test_sklearn_loss_curve_fallback():
+def test_legacy_unknown_framework_remains_viewable():
     metadata = {
-        "framework": "sklearn",
+        "framework": "legacy_tree_model",
         "status": "running",
         "start_time_epoch": 100.0,
-        "config": {"monitor": False},
-    }
-
-    snapshot = build_overview_snapshot(
-        run_id="sklearn-loss-curve",
-        metadata=metadata,
-        metrics=[],
-        runtime_state={"status": "running", "heartbeat_ts": 104.0, "current_step": 0},
-        sklearn_diagnostics=[{"step": 1, "n_iter": 3, "loss_curve": [0.8, 0.7, 0.5]}],
-        now_ts=104.0,
-    )
-
-    assert snapshot["framework"] == "sklearn"
-    assert snapshot["current_step"] == 3
-    assert snapshot["total_steps"] == 3
-    assert snapshot["total_steps_source"] == "diagnostics"
-    assert snapshot["loss_history"] == [[1.0, 0.8], [2.0, 0.7], [3.0, 0.5]]
-
-
-def test_xgboost_unknown_framework_inference_and_loss_mapping():
-    metadata = {
-        "framework": "unknown",
-        "status": "running",
-        "start_time_epoch": 10.0,
-        "config": {"objective": "binary:logistic", "num_boost_round": 4, "eta": 0.1},
+        "config": {"monitor": False, "max_steps": 3},
     }
     metrics = [
-        {"step": 1, "timestamp": 11.0, "train_logloss": 0.7, "test_logloss": 0.75},
-        {"step": 2, "timestamp": 12.0, "train_logloss": 0.6, "test_logloss": 0.7},
+        {"step": 1, "timestamp": 101.0, "loss": 0.8, "val_loss": 0.9},
+        {"step": 2, "timestamp": 102.0, "loss": 0.7, "val_loss": 0.8},
     ]
 
     snapshot = build_overview_snapshot(
-        run_id="xgb-functional",
+        run_id="legacy-framework-run",
+        metadata=metadata,
+        metrics=metrics,
+        runtime_state={"status": "running", "heartbeat_ts": 102.0, "current_step": 2},
+        now_ts=102.5,
+    )
+
+    assert snapshot["framework"] == "legacy_tree_model"
+    assert snapshot["current_step"] == 2
+    assert snapshot["total_steps"] == 3
+    assert snapshot["total_steps_source"] == "config"
+    assert snapshot["loss_history"][-1] == [2.0, 0.7]
+    assert snapshot["val_loss_history"][-1] == [2.0, 0.8]
+
+
+def test_keras_framework_normalizes_to_tensorflow():
+    metadata = {
+        "framework": "keras",
+        "status": "running",
+        "start_time_epoch": 10.0,
+        "config": {"max_steps": 4, "learning_rate": 0.1},
+    }
+    metrics = [
+        {"step": 1, "timestamp": 11.0, "loss": 0.7, "val_loss": 0.75},
+        {"step": 2, "timestamp": 12.0, "loss": 0.6, "val_loss": 0.7},
+    ]
+
+    snapshot = build_overview_snapshot(
+        run_id="keras-run",
         metadata=metadata,
         metrics=metrics,
         runtime_state={"status": "running", "heartbeat_ts": 12.0, "current_step": 2},
         now_ts=12.2,
     )
 
-    assert snapshot["framework"] == "xgboost"
+    assert snapshot["framework"] == "tensorflow"
     assert snapshot["total_steps"] == 4
     assert snapshot["total_steps_source"] == "config"
     assert snapshot["loss_history"][-1] == [2.0, 0.6]

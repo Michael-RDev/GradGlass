@@ -4,6 +4,7 @@ import useRunStore from '../store/useRunStore';
 import ReactECharts from 'echarts-for-react';
 import { Settings2, Eye, EyeOff } from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
+import { extractNumericSeries } from '../utils';
 
 export default function Training() {
   const { runId } = useParams();
@@ -15,15 +16,7 @@ export default function Training() {
   }, [runId, setActiveRun]);
 
   const availableMetrics = useMemo(() => {
-    const keys = discoverMetricKeys();
-    return keys.filter((key) =>
-      metrics.some((m) => {
-        const value = m[key];
-        if (value == null) return false;
-        const numeric = typeof value === 'number' ? value : Number(value);
-        return Number.isFinite(numeric);
-      })
-    );
+    return discoverMetricKeys();
   }, [metrics, discoverMetricKeys]);
 
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -78,21 +71,29 @@ export default function Training() {
 
     selectedMetrics.forEach((metricKey, i) => {
       const color = colors[i % colors.length];
-      const rawData = metrics
-        .map((m) => {
-          if (!(metricKey in m)) return null;
-          const stepValue = typeof m.step === 'number' ? m.step : Number(m.step);
-          const metricValue = typeof m[metricKey] === 'number' ? m[metricKey] : Number(m[metricKey]);
-          if (!Number.isFinite(stepValue) || !Number.isFinite(metricValue)) return null;
-          return [stepValue, metricValue];
-        })
-        .filter(Boolean);
+      const rawData = extractNumericSeries(metrics, metricKey);
       if (rawData.length === 0) return;
 
-      const smoothedData = getSmoothedData(rawData, smoothing);
       legendMetrics.push(metricKey);
-      
-      // Add raw (faded) and smoothed series
+
+      if (rawData.length === 1) {
+        series.push({
+          id: `point:${metricKey}`,
+          name: metricKey,
+          type: 'line',
+          data: rawData,
+          showSymbol: true,
+          symbol: 'circle',
+          symbolSize: 9,
+          lineStyle: { color, width: 0, opacity: 0 },
+          itemStyle: { color }
+        });
+        return;
+      }
+
+      const smoothedData = getSmoothedData(rawData, smoothing);
+
+      // Add raw (faded) and smoothed series for multi-point metrics
       if (smoothing > 0) {
         series.push({
           id: `raw:${metricKey}`,
@@ -173,6 +174,8 @@ export default function Training() {
     };
   }, [metrics, selectedMetrics, smoothing, theme]);
 
+  const hasRenderableSeries = chartOptions.series.length > 0;
+
   if (availableMetrics.length === 0) {
     return <div className="p-8 text-theme-text-secondary">No scalar metrics found matching this run.</div>;
   }
@@ -229,6 +232,10 @@ export default function Training() {
           {selectedMetrics.length === 0 ? (
             <div className="h-full flex items-center justify-center text-theme-text-muted">
               Select metrics from the sidebar to view them here.
+            </div>
+          ) : !hasRenderableSeries ? (
+            <div className="h-full flex items-center justify-center text-theme-text-muted">
+              Selected metrics have no plottable step/value points yet.
             </div>
           ) : (
             <ReactECharts 

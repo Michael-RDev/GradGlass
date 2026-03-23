@@ -16,6 +16,10 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/dashboard" element={<Home />} />
+        <Route path="/experiments" element={<Home />} />
+        <Route path="/models" element={<Home />} />
+        <Route path="/datasets" element={<Home />} />
         <Route path="/run/:runId" element={<Navigate to="overview" replace />} />
         <Route path="/run/:runId/overview" element={<Overview />} />
         <Route path="/run/:runId/training" element={<Training />} />

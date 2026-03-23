@@ -108,6 +108,45 @@ class _FakePsutil:
         return _Net()
 
 
+class _FakeTrainingProcess:
+    def __init__(self, create_time: float = 1234.0):
+        self._create_time = create_time
+        self._cpu_calls = 0
+
+    def create_time(self):
+        return self._create_time
+
+    def is_running(self):
+        return True
+
+    def status(self):
+        return "running"
+
+    def cpu_percent(self, interval=None):
+        self._cpu_calls += 1
+        return 0.0 if self._cpu_calls == 1 else 41.75
+
+    def memory_percent(self):
+        return 17.5
+
+    def memory_info(self):
+        class _Mem:
+            rss = 256 * 1024 * 1024
+
+        return _Mem()
+
+
+class _FakeTrainingPsutil:
+    STATUS_ZOMBIE = "zombie"
+    _processes: dict[int, _FakeTrainingProcess] = {}
+
+    @classmethod
+    def Process(cls, pid):
+        if pid not in cls._processes:
+            cls._processes[pid] = _FakeTrainingProcess()
+        return cls._processes[pid]
+
+
 def test_collect_infrastructure_cpu_ram_live_without_gpu(tmp_store, monkeypatch):
     run_id = "cpu-only"
     _seed_run(tmp_store, run_id)
@@ -136,6 +175,19 @@ def test_collect_infrastructure_cpu_ram_live_without_gpu(tmp_store, monkeypatch)
     for key in ("power_draw", "multi_gpu_compute_utilization", "gpu_memory_fragmentation"):
         assert payload["metrics"][key]["status"] == "unavailable"
         assert "pynvml" in (payload["metrics"][key]["error"] or "")
+
+    v2 = payload["telemetry_v2"]
+    aggregate = v2["aggregate_accelerator"]["metrics"]
+    external = v2["external_usage"]
+
+    assert aggregate["memory_pressure_percent"]["status"] == "not_detected"
+    assert aggregate["memory_pressure_percent"]["value"] is None
+    assert aggregate["power_watts"]["status"] == "not_supported"
+    assert aggregate["power_watts"]["value"] is None
+    assert aggregate["temperature_c"]["status"] == "not_supported"
+    assert aggregate["temperature_c"]["value"] is None
+    assert external["process_cpu_percent"]["value"] is None
+    assert external["process_cpu_percent"]["status"] == "not_detected"
 
 
 def test_cpu_and_ram_probes_are_unavailable_without_psutil(monkeypatch):
@@ -284,3 +336,78 @@ def test_telemetry_v2_run_status_is_normalized(tmp_store, monkeypatch):
     payload = telemetry.collect_infrastructure_telemetry(tmp_store, run_id)
     assert payload["telemetry_v2"]["run_state"]["status"] == "completed"
     assert payload["telemetry_v2"]["graph_hints"]["run_terminal"] is True
+
+
+def test_training_process_cpu_warmup_then_active(monkeypatch):
+    telemetry._PROCESS_CPU_SAMPLE_CACHE.clear()
+    _FakeTrainingPsutil._processes = {}
+    monkeypatch.setattr(telemetry, "_import_psutil", lambda: _FakeTrainingPsutil)
+
+    runtime_state = {"training_pid": 4321, "training_process_start_time": 1234.0}
+
+    first = telemetry._collect_training_process_metrics(
+        runtime_state=runtime_state,
+        collected_at=1.0,
+        host_cpu_metric={"value": 80.0},
+    )
+    first_cpu = first["process_cpu_percent"]
+    assert first_cpu["status"] == "not_detected"
+    assert first_cpu["value"] is None
+    assert first_cpu["details"]["warmup"] is True
+
+    second = telemetry._collect_training_process_metrics(
+        runtime_state=runtime_state,
+        collected_at=3.0,
+        host_cpu_metric={"value": 80.0},
+    )
+    second_cpu = second["process_cpu_percent"]
+    assert second_cpu["status"] == "active"
+    assert second_cpu["value"] == 41.75
+    assert second_cpu["details"]["warmup"] is False
+    assert second_cpu["details"]["cpu_share_of_host_percent"] == 52.19
+
+
+def test_local_insights_samples_per_sec_uses_non_zero_training_metric(tmp_store, monkeypatch):
+    run_id = "samples-per-sec-run"
+    _seed_run(tmp_store, run_id)
+    run_dir = tmp_store.get_run_dir(run_id)
+    with open(run_dir / "metrics.jsonl", "w") as f:
+        f.write(json.dumps({"step": 1, "timestamp": 100.0, "samples_per_sec": 256.5}) + "\n")
+
+    monkeypatch.setattr(telemetry, "_import_psutil", lambda: _FakePsutil())
+    monkeypatch.setattr(telemetry, "_get_nvml_module", lambda: (None, "pynvml is not installed"))
+
+    payload = telemetry.collect_infrastructure_telemetry(tmp_store, run_id)
+    local = payload["telemetry_v2"]["local_performance_insights"]
+    samples_metric = local["samples_per_sec"]
+    loading_metric = local["batch_loading_speed"]
+
+    assert samples_metric["status"] == "active"
+    assert samples_metric["value"] == 256.5
+    assert loading_metric["status"] == "active"
+    assert loading_metric["value"] == 256.5
+
+
+def test_collect_infrastructure_survives_malformed_runtime_state(tmp_store, monkeypatch):
+    run_id = "malformed-runtime-state"
+    _seed_run(tmp_store, run_id)
+    run_dir = tmp_store.get_run_dir(run_id)
+    (run_dir / "runtime_state.json").write_text("")
+
+    monkeypatch.setattr(telemetry, "_import_psutil", lambda: _FakePsutil())
+    monkeypatch.setattr(telemetry, "_get_nvml_module", lambda: (None, "pynvml is not installed"))
+
+    payload = telemetry.collect_infrastructure_telemetry(tmp_store, run_id)
+    assert payload["run_id"] == run_id
+    assert payload["mode"] in {"standalone", "distributed"}
+    assert "telemetry_v2" in payload
+    assert payload["telemetry_v2"]["run_state"]["status"] in {
+        "running",
+        "starting",
+        "paused",
+        "idle",
+        "completed",
+        "failed",
+        "interrupted",
+        "cancelled",
+    }

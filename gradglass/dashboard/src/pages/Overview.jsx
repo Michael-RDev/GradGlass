@@ -4,7 +4,14 @@ import useRunStore from '../store/useRunStore';
 import { useTheme } from '../components/ThemeProvider';
 import { StatusBadge } from '../components/ui';
 import ReactECharts from 'echarts-for-react';
-import { ShieldCheck, ShieldAlert, AlertTriangle, Zap, Target, BookOpen, Clock, TrendingDown } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, AlertTriangle, Zap, Target, Clock, TrendingDown } from 'lucide-react';
+import {
+  DEFAULT_METRIC_EXCLUDE_KEYS,
+  extractNumericSeries,
+  formatMetricKeyLabel,
+  latestSeriesValue,
+  resolvePrimaryMetricKey,
+} from '../utils';
 
 const HEALTH_STYLES = {
   HEALTHY: {
@@ -29,12 +36,45 @@ const HEALTH_STYLES = {
   },
 };
 
-function extractSeries(metrics, key) {
-  const data = metrics
-    .filter((m) => key in m && m[key] !== null && m[key] !== undefined)
-    .map((m) => [m.step, m[key]]);
-  return data.length > 0 ? data : [];
-}
+const TRAIN_FALLBACK_PRIORITY = [
+  'train_accuracy',
+  'accuracy',
+  'acc',
+  'train_acc',
+  'train_f1',
+  'f1',
+  'train_auc',
+  'auc',
+  'train_r2',
+  'r2',
+  'train_score',
+  'score',
+];
+
+const VAL_FALLBACK_PRIORITY = [
+  'val_accuracy',
+  'validation_accuracy',
+  'test_accuracy',
+  'val_acc',
+  'validation_acc',
+  'test_acc',
+  'val_f1',
+  'validation_f1',
+  'test_f1',
+  'f1',
+  'val_auc',
+  'validation_auc',
+  'test_auc',
+  'auc',
+  'val_r2',
+  'validation_r2',
+  'test_r2',
+  'r2',
+  'val_score',
+  'validation_score',
+  'test_score',
+  'score',
+];
 
 function formatDuration(seconds) {
   if (seconds == null || Number.isNaN(seconds)) return '-';
@@ -67,16 +107,75 @@ export default function Overview() {
   const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
   const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
 
-  const trainLoss = overview?.loss_history?.length ? overview.loss_history : extractSeries(metrics, 'loss');
-  const valLoss = overview?.val_loss_history?.length ? overview.val_loss_history : extractSeries(metrics, 'val_loss');
-  const lrData = overview?.lr_history?.length ? overview.lr_history : extractSeries(metrics, 'lr');
+  const trainLoss = overview?.loss_history?.length ? overview.loss_history : extractNumericSeries(metrics, 'loss');
+  const valLoss = overview?.val_loss_history?.length ? overview.val_loss_history : extractNumericSeries(metrics, 'val_loss');
+  const lrData = overview?.lr_history?.length ? overview.lr_history : extractNumericSeries(metrics, 'lr');
 
-  const perplexity = extractSeries(metrics, 'perplexity');
-  const throughput = extractSeries(metrics, 'tokens_per_sec').length
-    ? extractSeries(metrics, 'tokens_per_sec')
-    : extractSeries(metrics, 'throughput');
-  const reward = extractSeries(metrics, 'reward').length ? extractSeries(metrics, 'reward') : extractSeries(metrics, 'mean_reward');
-  const klDiv = extractSeries(metrics, 'kl_divergence').length ? extractSeries(metrics, 'kl_divergence') : extractSeries(metrics, 'kl');
+  const hasLossSeries = trainLoss.length > 0 || valLoss.length > 0;
+
+  const trainFallbackKey = !hasLossSeries
+    ? resolvePrimaryMetricKey(metrics, {
+        priorityKeys: TRAIN_FALLBACK_PRIORITY,
+        includeTokens: ['train', 'accuracy', 'acc', 'f1', 'auc', 'r2', 'score', 'precision', 'recall'],
+        excludeTokens: ['val', 'validation', 'test'],
+        excludeKeys: DEFAULT_METRIC_EXCLUDE_KEYS,
+      })
+    : null;
+
+  let valFallbackKey = !hasLossSeries
+    ? resolvePrimaryMetricKey(metrics, {
+        priorityKeys: VAL_FALLBACK_PRIORITY,
+        includeTokens: ['val', 'validation', 'test', 'accuracy', 'acc', 'f1', 'auc', 'r2', 'score', 'precision', 'recall'],
+        excludeTokens: ['train'],
+        excludeKeys: DEFAULT_METRIC_EXCLUDE_KEYS,
+      })
+    : null;
+
+  if (!hasLossSeries && trainFallbackKey && valFallbackKey && trainFallbackKey.toLowerCase() === valFallbackKey.toLowerCase()) {
+    const lowered = valFallbackKey.toLowerCase();
+    if (!lowered.includes('val') && !lowered.includes('validation') && !lowered.includes('test')) {
+      valFallbackKey = null;
+    }
+  }
+
+  const primaryTrainSeries = hasLossSeries
+    ? trainLoss
+    : (trainFallbackKey ? extractNumericSeries(metrics, trainFallbackKey) : []);
+  const primaryValSeries = hasLossSeries
+    ? valLoss
+    : (valFallbackKey ? extractNumericSeries(metrics, valFallbackKey) : []);
+
+  const trainMetricKey = hasLossSeries ? 'loss' : trainFallbackKey;
+  const valMetricKey = hasLossSeries ? 'val_loss' : valFallbackKey;
+
+  const trainMetricLabel = hasLossSeries
+    ? 'Training Performance (Loss)'
+    : `Training Performance (${formatMetricKeyLabel(trainMetricKey || valMetricKey)})`;
+  const valMetricLabel = hasLossSeries
+    ? 'Validation Loss'
+    : (valMetricKey ? formatMetricKeyLabel(valMetricKey) : 'Validation Metric');
+
+  const latestTrainMetric = hasLossSeries
+    ? (overview?.latest_loss ?? latestSeriesValue(primaryTrainSeries))
+    : latestSeriesValue(primaryTrainSeries);
+  const latestValMetric = hasLossSeries
+    ? (overview?.latest_val_loss ?? latestSeriesValue(primaryValSeries))
+    : latestSeriesValue(primaryValSeries);
+
+  const noPrimarySeriesMessage = hasLossSeries
+    ? 'No loss metrics logged yet.'
+    : 'No train/validation metrics logged yet.';
+
+  const perplexity = extractNumericSeries(metrics, 'perplexity');
+  const throughput = extractNumericSeries(metrics, 'tokens_per_sec').length
+    ? extractNumericSeries(metrics, 'tokens_per_sec')
+    : extractNumericSeries(metrics, 'throughput');
+  const reward = extractNumericSeries(metrics, 'reward').length
+    ? extractNumericSeries(metrics, 'reward')
+    : extractNumericSeries(metrics, 'mean_reward');
+  const klDiv = extractNumericSeries(metrics, 'kl_divergence').length
+    ? extractNumericSeries(metrics, 'kl_divergence')
+    : extractNumericSeries(metrics, 'kl');
 
   const commonChartOptions = {
     backgroundColor: 'transparent',
@@ -97,26 +196,46 @@ export default function Overview() {
     },
   };
 
-  const lossOptions = {
+  const trainLegendName = hasLossSeries ? 'Train Loss' : formatMetricKeyLabel(trainMetricKey || 'train_metric');
+  const valLegendName = hasLossSeries ? 'Val Loss' : formatMetricKeyLabel(valMetricKey || 'validation_metric');
+  const primaryLegendData = [
+    ...(primaryTrainSeries.length > 0 ? [trainLegendName] : []),
+    ...(primaryValSeries.length > 0 ? [valLegendName] : []),
+  ];
+
+  const primaryMetricOptions = {
     ...commonChartOptions,
-    legend: { data: ['Train Loss', 'Val Loss'], textStyle: { color: textColor }, top: 0, right: 0 },
+    legend: {
+      data: primaryLegendData,
+      textStyle: { color: textColor },
+      top: 0,
+      right: 0,
+    },
     series: [
-      {
-        name: 'Train Loss',
-        type: 'line',
-        data: trainLoss,
-        showSymbol: false,
-        smooth: true,
-        itemStyle: { color: '#FDA481' },
-      },
-      ...(valLoss.length > 0
+      ...(primaryTrainSeries.length > 0
         ? [
             {
-              name: 'Val Loss',
+              name: trainLegendName,
               type: 'line',
-              data: valLoss,
-              showSymbol: false,
+              data: primaryTrainSeries,
+              showSymbol: primaryTrainSeries.length === 1,
+              symbolSize: primaryTrainSeries.length === 1 ? 9 : 5,
               smooth: true,
+              lineStyle: { color: '#FDA481', width: primaryTrainSeries.length === 1 ? 0 : 2 },
+              itemStyle: { color: '#FDA481' },
+            },
+          ]
+        : []),
+      ...(primaryValSeries.length > 0
+        ? [
+            {
+              name: valLegendName,
+              type: 'line',
+              data: primaryValSeries,
+              showSymbol: primaryValSeries.length === 1,
+              symbolSize: primaryValSeries.length === 1 ? 9 : 5,
+              smooth: true,
+              lineStyle: { color: '#B4182D', width: primaryValSeries.length === 1 ? 0 : 2 },
               itemStyle: { color: '#B4182D' },
             },
           ]
@@ -274,18 +393,18 @@ export default function Overview() {
 
         <div className="card flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2 opacity-80">
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Training Performance (Loss)</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{trainMetricLabel}</p>
             <TrendingDown className="w-4 h-4 text-rose-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatFloat(overview?.latest_loss, 5)}</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatFloat(latestTrainMetric, 5)}</p>
         </div>
 
         <div className="card flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2 opacity-80">
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Validation Loss</p>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{valMetricLabel}</p>
             <TrendingDown className="w-4 h-4 text-red-500" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatFloat(overview?.latest_val_loss, 5)}</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white">{formatFloat(latestValMetric, 5)}</p>
         </div>
 
         <div className="card flex flex-col justify-between">
@@ -299,13 +418,13 @@ export default function Overview() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card h-[380px] flex flex-col">
-          <h3 className="h3 text-theme-text-primary mb-2">Training Performance (Loss)</h3>
+          <h3 className="h3 text-theme-text-primary mb-2">{trainMetricLabel}</h3>
           <div className="flex-1 min-h-0 relative">
-            {trainLoss.length > 0 || valLoss.length > 0 ? (
-              <ReactECharts option={lossOptions} style={{ height: '100%', width: '100%' }} />
+            {primaryTrainSeries.length > 0 || primaryValSeries.length > 0 ? (
+              <ReactECharts option={primaryMetricOptions} style={{ height: '100%', width: '100%' }} />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">
-                No loss metrics logged yet.
+                {noPrimarySeriesMessage}
               </div>
             )}
           </div>

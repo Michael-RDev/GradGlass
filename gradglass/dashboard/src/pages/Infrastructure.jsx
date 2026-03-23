@@ -1,14 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { Activity, BarChart3, Cpu, Database, Gauge, HardDrive, Network, Server, Thermometer, Zap } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Cpu,
+  Database,
+  Gauge,
+  HardDrive,
+  Network,
+  Server,
+  Thermometer,
+} from 'lucide-react';
 import { useTheme } from '../components/ThemeProvider';
 import { fetchInfrastructureTelemetry } from '../api';
 import { StatusBadge } from '../components/ui';
 
 const POLL_INTERVAL_MS = 2000;
 const HISTORY_LIMIT = 60;
+
 const SERIES_COLORS = ['#FDA481', '#B4182D', '#54162B', '#37415C', '#2F8F9D', '#6A7286', '#22C55E', '#0EA5E9'];
+
+const THRESHOLDS = {
+  cpu_bottleneck_score: { warn: 75, critical: 90 },
+  memory_pressure: { warn: 85, critical: 95 },
+  disk_io_pressure: { warn: 70, critical: 85 },
+  accelerator_starvation_idle: { warn: 50, critical: 75 },
+  scaling_readiness: { warn: 60, critical: 40 },
+};
 
 const STATUS_STYLES = {
   active: 'text-emerald-700 bg-emerald-500/10 border-emerald-500/30 dark:text-emerald-300',
@@ -20,6 +41,21 @@ const STATUS_STYLES = {
   interrupted_training_stopped: 'text-orange-700 bg-orange-500/10 border-orange-500/30 dark:text-orange-300',
   error: 'text-red-700 bg-red-500/10 border-red-500/30 dark:text-red-300',
 };
+
+const HEALTH_STYLES = {
+  HEALTHY: 'text-emerald-700 bg-emerald-500/10 border-emerald-500/30 dark:text-emerald-300',
+  WARNING: 'text-amber-700 bg-amber-500/10 border-amber-500/30 dark:text-amber-300',
+  STALLED: 'text-orange-700 bg-orange-500/10 border-orange-500/30 dark:text-orange-300',
+  FAILED: 'text-red-700 bg-red-500/10 border-red-500/30 dark:text-red-300',
+};
+
+const SEVERITY_STYLES = {
+  info: 'text-sky-700 bg-sky-500/10 border-sky-500/30 dark:text-sky-300',
+  warning: 'text-amber-700 bg-amber-500/10 border-amber-500/30 dark:text-amber-300',
+  critical: 'text-red-700 bg-red-500/10 border-red-500/30 dark:text-red-300',
+};
+
+const SEVERITY_ORDER = { critical: 3, warning: 2, info: 1 };
 
 function formatTimestamp(ts) {
   if (!ts) return '—';
@@ -33,11 +69,27 @@ function formatNumber(value, digits = 1) {
   return Number(value).toFixed(digits);
 }
 
+function parseFiniteNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Number(value)));
+}
+
 function modeLabel(mode) {
-  if (mode === 'cuda_active') return 'CUDA active';
-  if (mode === 'mps_active') return 'MPS active';
-  if (mode === 'cpu_only') return 'CPU-only mode';
-  if (mode === 'heterogeneous_active') return 'Multi-accelerator active';
+  if (mode === 'cuda_active') return 'GPU detected (CUDA)';
+  if (mode === 'mps_active') return 'GPU detected (MPS)';
+  if (mode === 'heterogeneous_active') return 'GPU detected (multi-accelerator)';
+  if (mode === 'cpu_only') return 'CPU-only';
   return 'Accelerator unavailable';
 }
 
@@ -61,12 +113,198 @@ function getMetric(group, key) {
 
 function metricValue(metric) {
   if (!metric || typeof metric !== 'object') return null;
-  const value = Number(metric.value);
-  return Number.isFinite(value) ? value : null;
+  return parseFiniteNumber(metric.value);
 }
 
-function hasFiniteValue(seriesValues) {
-  return Array.isArray(seriesValues) && seriesValues.some((value) => Number.isFinite(value));
+function hasFiniteValue(values) {
+  return Array.isArray(values) && values.some((value) => Number.isFinite(value));
+}
+
+function toSeries(values) {
+  return (values || []).map((value) => (Number.isFinite(value) ? value : null));
+}
+
+function historyLatestValue(history, key) {
+  for (let idx = history.length - 1; idx >= 0; idx -= 1) {
+    const value = history[idx]?.[key];
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function historyValues(history, key) {
+  return history.map((row) => (Number.isFinite(row?.[key]) ? row[key] : null));
+}
+
+function deriveStepTime(samplesPerSec) {
+  if (!Number.isFinite(samplesPerSec) || samplesPerSec <= 0) return null;
+  return 1 / samplesPerSec;
+}
+
+function severityFromHighThreshold(value, warn, critical) {
+  if (!Number.isFinite(value)) return null;
+  if (value >= critical) return 'critical';
+  if (value >= warn) return 'warning';
+  return null;
+}
+
+function severityFromLowThreshold(value, warn, critical) {
+  if (!Number.isFinite(value)) return null;
+  if (value < critical) return 'critical';
+  if (value < warn) return 'warning';
+  return null;
+}
+
+function computeInsights(localInsights, diagnostics, runState) {
+  const insightRules = [
+    {
+      metricKey: 'cpu_bottleneck_score',
+      label: 'CPU bottleneck',
+      threshold: THRESHOLDS.cpu_bottleneck_score,
+      direction: 'high',
+      diagnosis: 'Training is CPU-constrained and may underfeed the accelerator.',
+      recommendation: 'Increase dataloader workers and prefetching, and reduce heavy CPU-side transforms.',
+    },
+    {
+      metricKey: 'memory_pressure',
+      label: 'Memory pressure',
+      threshold: THRESHOLDS.memory_pressure,
+      direction: 'high',
+      diagnosis: 'Host memory is nearing saturation and can trigger paging or instability.',
+      recommendation: 'Lower batch size or worker footprint, and close competing memory-heavy processes.',
+    },
+    {
+      metricKey: 'disk_io_pressure',
+      label: 'Disk I/O pressure',
+      threshold: THRESHOLDS.disk_io_pressure,
+      direction: 'high',
+      diagnosis: 'Storage throughput is a likely bottleneck for data delivery.',
+      recommendation: 'Use local SSD/cache, shard datasets, and reduce random read amplification.',
+    },
+    {
+      metricKey: 'accelerator_starvation_idle',
+      label: 'Accelerator starvation',
+      threshold: THRESHOLDS.accelerator_starvation_idle,
+      direction: 'high',
+      diagnosis: 'Accelerator cycles are idle while waiting for input or host-side work.',
+      recommendation: 'Tune input pipeline latency (prefetch, pin memory, async transfer) to keep accelerators busy.',
+    },
+    {
+      metricKey: 'scaling_readiness',
+      label: 'Scaling readiness',
+      threshold: THRESHOLDS.scaling_readiness,
+      direction: 'low',
+      diagnosis: 'Current bottlenecks indicate poor scaling efficiency if expanded now.',
+      recommendation: 'Resolve top bottlenecks before scaling out to additional devices or nodes.',
+    },
+  ];
+
+  const insights = [];
+
+  insightRules.forEach((rule) => {
+    const metric = getMetric(localInsights, rule.metricKey);
+    const value = metricValue(metric);
+    if (!Number.isFinite(value)) return;
+
+    const severity =
+      rule.direction === 'high'
+        ? severityFromHighThreshold(value, rule.threshold.warn, rule.threshold.critical)
+        : severityFromLowThreshold(value, rule.threshold.warn, rule.threshold.critical);
+
+    const thresholdValue = rule.direction === 'high' ? rule.threshold.warn : rule.threshold.warn;
+
+    insights.push({
+      severity: severity || 'info',
+      metricKey: rule.metricKey,
+      label: rule.label,
+      currentValue: value,
+      threshold: thresholdValue,
+      diagnosis: rule.diagnosis,
+      recommendation: rule.recommendation,
+    });
+  });
+
+  const warnings = insights
+    .filter((item) => item.severity === 'warning' || item.severity === 'critical')
+    .map((item) => ({
+      severity: item.severity,
+      title: item.label,
+      message: `${item.label} is ${formatNumber(item.currentValue, 1)}. Threshold is ${item.threshold}.`,
+      source: 'heuristic',
+    }));
+
+  if (Array.isArray(diagnostics)) {
+    diagnostics.forEach((diag) => {
+      if (!diag || typeof diag !== 'object') return;
+      const status = String(diag.status || '').toLowerCase();
+      if (!status || status === 'active') return;
+      const severity = status.includes('error') || status.includes('missing') ? 'critical' : 'warning';
+      warnings.push({
+        severity,
+        title: `${diag.scope || 'diagnostic'}: ${status.replaceAll('_', ' ')}`,
+        message: diag.message || 'Telemetry diagnostic warning.',
+        source: 'diagnostic',
+      });
+    });
+  }
+
+  const health = String(runState?.health_state || '').toUpperCase();
+  if (health === 'WARNING' || health === 'FAILED' || health === 'STALLED') {
+    warnings.push({
+      severity: health === 'FAILED' ? 'critical' : 'warning',
+      title: `Run health: ${health}`,
+      message: 'Run health state indicates instability or degraded operation.',
+      source: 'run_state',
+    });
+  }
+
+  warnings.sort((a, b) => {
+    const severityDiff = (SEVERITY_ORDER[b.severity] || 0) - (SEVERITY_ORDER[a.severity] || 0);
+    if (severityDiff !== 0) return severityDiff;
+    return a.title.localeCompare(b.title);
+  });
+
+  const recommendations = Array.from(
+    new Set(
+      insights
+        .filter((item) => item.severity === 'warning' || item.severity === 'critical')
+        .map((item) => item.recommendation),
+    ),
+  );
+
+  const bottleneckRanking = [
+    {
+      key: 'cpu_bottleneck_score',
+      label: 'CPU bottleneck',
+      value: metricValue(getMetric(localInsights, 'cpu_bottleneck_score')),
+    },
+    {
+      key: 'memory_pressure',
+      label: 'Memory pressure',
+      value: metricValue(getMetric(localInsights, 'memory_pressure')),
+    },
+    {
+      key: 'disk_io_pressure',
+      label: 'Disk I/O pressure',
+      value: metricValue(getMetric(localInsights, 'disk_io_pressure')),
+    },
+    {
+      key: 'accelerator_starvation_idle',
+      label: 'Accelerator starvation',
+      value: metricValue(getMetric(localInsights, 'accelerator_starvation_idle')),
+    },
+    {
+      key: 'scaling_gap',
+      label: 'Scaling readiness gap',
+      value: Number.isFinite(metricValue(getMetric(localInsights, 'scaling_readiness')))
+        ? Math.max(0, 100 - Number(metricValue(getMetric(localInsights, 'scaling_readiness'))))
+        : null,
+    },
+  ]
+    .filter((item) => Number.isFinite(item.value))
+    .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+  return { insights, warnings, recommendations, bottleneckRanking };
 }
 
 function MetricBadge({ metric }) {
@@ -75,97 +313,47 @@ function MetricBadge({ metric }) {
   return <span className={`badge ${metricStatusClass(status)}`}>{label}</span>;
 }
 
-function MetricTile({ title, icon: Icon, metric, fallback = '—' }) {
-  const valueText = metric?.display || fallback;
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between opacity-90">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-        <Icon className="h-4 w-4 text-theme-accent" />
-      </div>
-      <p className="mt-3 text-2xl font-bold text-slate-900 dark:text-white">{valueText}</p>
-      <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-        <MetricBadge metric={metric} />
-        <span>Updated {formatTimestamp(metric?.timestamp)}</span>
-      </div>
-      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-        Source: <span className="font-mono">{metric?.source || 'unknown'}</span>
-      </p>
-      <p className="text-xs text-slate-500 dark:text-slate-400 break-all">
-        Probe: <span className="font-mono">{metric?.probe || 'unknown'}</span>
-      </p>
-    </div>
-  );
-}
-
-function AcceleratorCard({ accelerator, historySeries, gridColor }) {
-  const util = getMetric(accelerator?.metrics, 'utilization_percent');
-  const mem = getMetric(accelerator?.metrics, 'memory_pressure_percent');
-  const frag = getMetric(accelerator?.metrics, 'memory_fragmentation_percent');
-  const power = getMetric(accelerator?.metrics, 'power_watts');
-  const fan = getMetric(accelerator?.metrics, 'fan_speed_percent');
-
-  const miniOption = {
-    tooltip: { trigger: 'axis' },
-    grid: { left: 8, right: 8, top: 10, bottom: 10 },
-    xAxis: { type: 'category', show: false, data: historySeries.labels },
+function buildSparklineOption({ labels, values, lineColor, areaColor, gridColor }) {
+  return {
+    animationDuration: 180,
+    animationDurationUpdate: 150,
+    grid: { left: 0, right: 0, top: 2, bottom: 0 },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      show: false,
+    },
     yAxis: {
       type: 'value',
-      min: 0,
-      max: 100,
       show: false,
+      min: 0,
       splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
     },
+    tooltip: { trigger: 'axis' },
     series: [
       {
         type: 'line',
-        data: historySeries.values,
+        data: values,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: '#FDA481' },
-        areaStyle: { color: 'rgba(253, 164, 129, 0.16)' },
+        lineStyle: { width: 2, color: lineColor },
+        areaStyle: { color: areaColor },
       },
     ],
   };
-
-  return (
-    <div className="card">
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-theme-text-primary">{accelerator?.name || accelerator?.id || 'Accelerator'}</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            {accelerator?.backend?.toUpperCase() || 'ACCELERATOR'} · {accelerator?.vendor || 'unknown vendor'}
-          </p>
-        </div>
-        <MetricBadge metric={util || { status: accelerator?.status || 'not_detected', status_label: 'Status unavailable' }} />
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <p className="text-slate-500 dark:text-slate-400">Utilization</p>
-        <p className="text-right font-mono text-theme-text-primary">{util?.display || '—'}</p>
-        <p className="text-slate-500 dark:text-slate-400">Memory pressure</p>
-        <p className="text-right font-mono text-theme-text-primary">{mem?.display || '—'}</p>
-        <p className="text-slate-500 dark:text-slate-400">Fragmentation</p>
-        <p className="text-right font-mono text-theme-text-primary">{frag?.display || '—'}</p>
-        <p className="text-slate-500 dark:text-slate-400">Power</p>
-        <p className="text-right font-mono text-theme-text-primary">{power?.display || '—'}</p>
-        <p className="text-slate-500 dark:text-slate-400">Fan</p>
-        <p className="text-right font-mono text-theme-text-primary">{fan?.display || '—'}</p>
-      </div>
-      <div className="mt-3 h-20">
-        {historySeries.values.length > 1 ? (
-          <ReactECharts option={miniOption} style={{ height: '100%', width: '100%' }} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-xs text-slate-500 dark:text-slate-400">
-            Waiting for utilization samples...
-          </div>
-        )}
-      </div>
-      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Updated {formatTimestamp(util?.timestamp || mem?.timestamp)}</p>
-    </div>
-  );
 }
 
-function buildLineOptions({ labels, series, yAxisName, yAxisMax, textColor, gridColor, dualAxis = false }) {
+function buildLineOptions({
+  labels,
+  series,
+  yAxisName,
+  yAxisMax,
+  textColor,
+  gridColor,
+  dualAxis = false,
+  showLegend = true,
+  gridTop = 36,
+}) {
   const normalizedSeries = (series || []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     const data = Array.isArray(s.data) ? s.data : [];
@@ -175,12 +363,13 @@ function buildLineOptions({ labels, series, yAxisName, yAxisMax, textColor, grid
     }
     return s;
   });
+
   return {
     animationDuration: 260,
     animationDurationUpdate: 220,
     tooltip: { trigger: 'axis' },
-    legend: { textStyle: { color: textColor }, top: 0 },
-    grid: { left: 48, right: dualAxis ? 54 : 24, bottom: 36, top: 36 },
+    legend: showLegend ? { textStyle: { color: textColor }, top: 0 } : undefined,
+    grid: { left: 48, right: dualAxis ? 54 : 24, bottom: 36, top: gridTop },
     xAxis: {
       type: 'category',
       data: labels,
@@ -192,9 +381,9 @@ function buildLineOptions({ labels, series, yAxisName, yAxisMax, textColor, grid
           {
             type: 'value',
             min: 0,
-            max: 100,
-            axisLabel: { color: textColor, formatter: '{value}%' },
-            name: yAxisName,
+            max: yAxisMax,
+            axisLabel: { color: textColor },
+            name: yAxisName || undefined,
             nameTextStyle: { color: textColor },
             splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
           },
@@ -212,7 +401,7 @@ function buildLineOptions({ labels, series, yAxisName, yAxisMax, textColor, grid
           min: 0,
           max: yAxisMax,
           axisLabel: { color: textColor },
-          name: yAxisName,
+          name: yAxisName || undefined,
           nameTextStyle: { color: textColor },
           splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
         },
@@ -220,9 +409,69 @@ function buildLineOptions({ labels, series, yAxisName, yAxisMax, textColor, grid
   };
 }
 
+function CoreHealthCard({ title, icon: Icon, metric, labels, values, lineColor, areaColor, gridColor }) {
+  const value = metricValue(metric);
+  const displayValue = metric?.display || (Number.isFinite(value) ? `${formatNumber(value, 1)}%` : '—');
+  const progressWidth = `${clampPercent(value)}%`;
+
+  const hasTrend = hasFiniteValue(values);
+
+  const sparklineOption = useMemo(
+    () =>
+      buildSparklineOption({
+        labels,
+        values,
+        lineColor,
+        areaColor,
+        gridColor,
+      }),
+    [labels, values, lineColor, areaColor, gridColor],
+  );
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between opacity-90">
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
+        <Icon className="h-4 w-4 text-theme-accent" />
+      </div>
+
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <p className="text-2xl font-bold text-slate-900 dark:text-white">{displayValue}</p>
+        <MetricBadge metric={metric} />
+      </div>
+
+      <div className="mt-3 h-2 rounded-full bg-theme-border/40 overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: progressWidth, backgroundColor: lineColor }} />
+      </div>
+
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Updated {formatTimestamp(metric?.timestamp)}</p>
+
+      <div className="mt-2 h-14">
+        {hasTrend ? (
+          <ReactECharts option={sparklineOption} style={{ width: '100%', height: '100%' }} />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-slate-500 dark:text-slate-400">
+            Waiting for samples...
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SeverityBadge({ severity }) {
+  const normalized = severity || 'info';
+  return (
+    <span className={`badge ${SEVERITY_STYLES[normalized] || SEVERITY_STYLES.info}`}>
+      {normalized.toUpperCase()}
+    </span>
+  );
+}
+
 export default function Infrastructure() {
   const { runId } = useParams();
   const { theme } = useTheme();
+
   const [telemetry, setTelemetry] = useState(null);
   const [history, setHistory] = useState([]);
   const [fetchError, setFetchError] = useState(null);
@@ -243,7 +492,6 @@ export default function Infrastructure() {
         const aggregate = v2?.aggregate_accelerator?.metrics || {};
         const host = v2?.host_metrics || {};
         const process = v2?.training_process_metrics || {};
-        const cluster = v2?.cluster_metrics || {};
         const external = v2?.external_usage || {};
         const local = v2?.local_performance_insights || {};
         const graphHints = v2?.graph_hints || {};
@@ -253,22 +501,19 @@ export default function Infrastructure() {
         const perAccelUtil = {};
         const perAccelMem = {};
         const accelerators = Array.isArray(v2?.accelerators) ? v2.accelerators : [];
+
         accelerators.forEach((acc, idx) => {
-          const name = acc?.name || acc?.id || `Accelerator ${idx}`;
+          const name = acc?.name || acc?.id || `Accelerator ${idx + 1}`;
           const utilValue = metricValue(getMetric(acc?.metrics, 'utilization_percent'));
           const memValue = metricValue(getMetric(acc?.metrics, 'memory_pressure_percent'));
           if (utilValue != null) perAccelUtil[name] = utilValue;
           if (memValue != null) perAccelMem[name] = memValue;
         });
 
+        const samplesPerSec = metricValue(getMetric(local, 'samples_per_sec'));
+
         const point = {
           ts,
-          aggregateUtil: metricValue(getMetric(aggregate, 'utilization_percent')),
-          aggregateMem: metricValue(getMetric(aggregate, 'memory_pressure_percent')),
-          aggregateFrag: metricValue(getMetric(aggregate, 'memory_fragmentation_percent')),
-          aggregatePower: metricValue(getMetric(aggregate, 'power_watts')),
-          aggregateTemp: metricValue(getMetric(aggregate, 'temperature_c')),
-          aggregateInterconnectRx: metricValue(getMetric(aggregate, 'interconnect_rx_mb_s')),
           hostCpu:
             metricValue(getMetric(external, 'host_cpu_percent')) ??
             metricValue(getMetric(host, 'system_cpu_percent')),
@@ -278,9 +523,11 @@ export default function Infrastructure() {
           processRam:
             metricValue(getMetric(external, 'process_ram_percent')) ??
             metricValue(getMetric(process, 'process_ram_percent')),
-          ramPressure:
+          systemRam:
             metricValue(getMetric(external, 'host_ram_percent')) ??
             metricValue(getMetric(host, 'system_ram_percent')),
+          samplesPerSec,
+          stepTime: deriveStepTime(samplesPerSec),
           diskRead:
             metricValue(getMetric(external, 'disk_read_mb_s')) ??
             metricValue(getMetric(host, 'disk_read_mb_s')),
@@ -293,16 +540,15 @@ export default function Infrastructure() {
           netTx:
             metricValue(getMetric(external, 'net_tx_mb_s')) ??
             metricValue(getMetric(host, 'network_tx_mb_s')),
-          samplesPerSec: metricValue(getMetric(local, 'samples_per_sec')),
-          dataloaderWait: metricValue(getMetric(local, 'dataloader_wait_time_s')),
-          hostToDeviceTransfer: metricValue(getMetric(local, 'host_to_device_transfer_time_s')),
-          cpuBottleneck: metricValue(getMetric(local, 'cpu_bottleneck_score')),
-          memoryPressureScore: metricValue(getMetric(local, 'memory_pressure')),
-          diskPressureScore: metricValue(getMetric(local, 'disk_io_pressure')),
-          acceleratorStarvation: metricValue(getMetric(local, 'accelerator_starvation_idle')),
           scalingReadiness: metricValue(getMetric(local, 'scaling_readiness')),
-          clusterRx: metricValue(getMetric(cluster, 'interconnect_rx_mb_s')),
-          clusterTx: metricValue(getMetric(cluster, 'interconnect_tx_mb_s')),
+          cpuBottleneck: metricValue(getMetric(local, 'cpu_bottleneck_score')),
+          memoryPressure: metricValue(getMetric(local, 'memory_pressure')),
+          diskPressure: metricValue(getMetric(local, 'disk_io_pressure')),
+          acceleratorStarvation: metricValue(getMetric(local, 'accelerator_starvation_idle')),
+          aggregateUtil: metricValue(getMetric(aggregate, 'utilization_percent')),
+          aggregateMem: metricValue(getMetric(aggregate, 'memory_pressure_percent')),
+          aggregatePower: metricValue(getMetric(aggregate, 'power_watts')),
+          aggregateTemp: metricValue(getMetric(aggregate, 'temperature_c')),
           perAccelUtil,
           perAccelMem,
         };
@@ -310,17 +556,20 @@ export default function Infrastructure() {
         setTelemetry(payload);
         setFetchError(null);
         setIsLoading(false);
+
         setHistory((prev) => {
           const stabilized = { ...point };
           const last = prev.length > 0 ? prev[prev.length - 1] : null;
           const runTerminal = Boolean(graphHints?.run_terminal);
+
           if (runTerminal && last) {
-            ['processCpu', 'processRam', 'samplesPerSec', 'dataloaderWait', 'hostToDeviceTransfer'].forEach((key) => {
+            ['processCpu', 'processRam', 'samplesPerSec', 'stepTime'].forEach((key) => {
               if (!Number.isFinite(stabilized[key]) && Number.isFinite(last[key])) {
                 stabilized[key] = last[key];
               }
             });
           }
+
           return [...prev, stabilized].slice(-HISTORY_LIMIT);
         });
       } catch (err) {
@@ -333,6 +582,7 @@ export default function Infrastructure() {
     };
 
     poll();
+
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
@@ -343,30 +593,51 @@ export default function Infrastructure() {
   const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)';
 
   const v2 = telemetry?.telemetry_v2 || {};
-  const aggregate = v2?.aggregate_accelerator?.metrics || {};
   const host = v2?.host_metrics || {};
   const processMetrics = v2?.training_process_metrics || {};
   const externalUsage = v2?.external_usage || {};
-  const graphHints = v2?.graph_hints || {};
   const localInsights = v2?.local_performance_insights || {};
-  const clusterMetrics = v2?.cluster_metrics || {};
+  const diagnostics = Array.isArray(v2?.diagnostics) ? v2.diagnostics : [];
   const runState = v2?.run_state || {};
+  const graphHints = v2?.graph_hints || {};
   const accelerators = Array.isArray(v2?.accelerators) ? v2.accelerators : [];
-  const preferredLayout = graphHints?.preferred_layout || 'host_process_first';
   const runTerminal = Boolean(graphHints?.run_terminal);
   const throughputWarmup = Boolean(graphHints?.throughput_warmup);
 
   const labels = history.map((entry) => formatTimestamp(entry.ts));
 
+  const systemCpuMetric = getMetric(externalUsage, 'host_cpu_percent') || getMetric(host, 'system_cpu_percent');
+  const processCpuMetric = getMetric(externalUsage, 'process_cpu_percent') || getMetric(processMetrics, 'process_cpu_percent');
+  const processRamMetric = getMetric(externalUsage, 'process_ram_percent') || getMetric(processMetrics, 'process_ram_percent');
+  const systemRamMetric = getMetric(externalUsage, 'host_ram_percent') || getMetric(host, 'system_ram_percent');
+
   const utilizationSeries = useMemo(() => {
     const aggregateLine = {
       name: 'Aggregate utilization',
       type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.aggregateUtil) ? entry.aggregateUtil : null)),
+      data: toSeries(historyValues(history, 'aggregateUtil')),
       smooth: true,
       showSymbol: false,
       lineStyle: { width: 3, color: '#FDA481' },
       areaStyle: { color: 'rgba(253, 164, 129, 0.12)' },
+    };
+
+    const hostCpuLine = {
+      name: 'Host CPU',
+      type: 'line',
+      data: toSeries(historyValues(history, 'hostCpu')),
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 2, color: '#37415C' },
+    };
+
+    const processCpuLine = {
+      name: 'Training process CPU',
+      type: 'line',
+      data: toSeries(historyValues(history, 'processCpu')),
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 2, type: 'dashed', color: '#0EA5E9' },
     };
 
     const perAcceleratorLines = [];
@@ -386,155 +657,29 @@ export default function Infrastructure() {
       });
     });
 
-    const hostCpuLine = {
-      name: 'Host CPU',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.hostCpu) ? entry.hostCpu : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2, color: '#37415C' },
-      areaStyle: { color: 'rgba(55, 65, 92, 0.10)' },
-    };
-    const processCpuLine = {
-      name: 'Training process CPU',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.processCpu) ? entry.processCpu : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2, type: 'dashed', color: '#0EA5E9' },
-    };
-
-    const acceleratorLines = [aggregateLine, ...perAcceleratorLines].filter((series) => hasFiniteValue(series.data));
-    const hostProcessLines = [hostCpuLine, processCpuLine].filter((series) => hasFiniteValue(series.data));
-
-    if (preferredLayout === 'accelerator_first' && acceleratorLines.length > 0) {
-      return [...acceleratorLines, ...hostProcessLines];
-    }
-    if (hostProcessLines.length > 0) {
-      return [...hostProcessLines, ...acceleratorLines];
-    }
-    if (acceleratorLines.length > 0) {
-      return acceleratorLines;
-    }
-
-    const hostRamFallback = {
-      name: 'Host RAM',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.ramPressure) ? entry.ramPressure : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2, color: '#B4182D' },
-    };
-    return hasFiniteValue(hostRamFallback.data) ? [hostRamFallback] : [];
-  }, [history, preferredLayout]);
-
-  const memorySeries = useMemo(() => {
-    const lines = [];
-
-    const hostRamLine = {
-      name: 'System RAM pressure',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.ramPressure) ? entry.ramPressure : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 3, color: '#37415C' },
-      areaStyle: { color: 'rgba(55, 65, 92, 0.10)' },
-    };
-    if (hasFiniteValue(hostRamLine.data)) {
-      lines.push(hostRamLine);
-    }
-
-    const processRamLine = {
-      name: 'Process RAM pressure',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.processRam) ? entry.processRam : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2, type: 'dashed', color: '#0EA5E9' },
-    };
-    if (hasFiniteValue(processRamLine.data)) {
-      lines.push(processRamLine);
-    }
-
-    const aggregateMemoryLine = {
-      name: 'Aggregate memory pressure',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.aggregateMem) ? entry.aggregateMem : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 3, color: '#B4182D' },
-      areaStyle: { color: 'rgba(180, 24, 45, 0.12)' },
-    };
-    if (hasFiniteValue(aggregateMemoryLine.data)) {
-      lines.push(aggregateMemoryLine);
-    }
-
-    const aggregateFragLine = {
-      name: 'Aggregate fragmentation',
-      type: 'line',
-      data: history.map((entry) => (Number.isFinite(entry.aggregateFrag) ? entry.aggregateFrag : null)),
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 2, color: '#F97316' },
-    };
-    if (hasFiniteValue(aggregateFragLine.data)) {
-      lines.push(aggregateFragLine);
-    }
-
-    const names = new Set();
-    history.forEach((entry) => Object.keys(entry.perAccelMem || {}).forEach((name) => names.add(name)));
-    Array.from(names).forEach((name, idx) => {
-      const series = {
-        name: `${name} memory`,
-        type: 'line',
-        data: history.map((entry) => {
-          const value = entry.perAccelMem?.[name];
-          return Number.isFinite(value) ? value : null;
-        }),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: SERIES_COLORS[(idx + 3) % SERIES_COLORS.length] },
-      };
-      if (hasFiniteValue(series.data)) {
-        lines.push(series);
-      }
-    });
-
-    lines.push({
-      name: 'Pressure threshold (85%)',
-      type: 'line',
-      data: history.map(() => 85),
-      showSymbol: false,
-      lineStyle: { width: 1.5, type: 'dotted', color: '#F59E0B' },
-      markArea: {
-        silent: true,
-        itemStyle: { color: 'rgba(245, 158, 11, 0.08)' },
-        data: [[{ yAxis: 85 }, { yAxis: 100 }]],
-      },
-    });
-
-    return lines;
+    return [aggregateLine, hostCpuLine, processCpuLine, ...perAcceleratorLines].filter((series) => hasFiniteValue(series.data));
   }, [history]);
 
-  const thermalPowerSeries = useMemo(
+  const samplesStepSeries = useMemo(
     () => [
       {
-        name: 'Temperature',
+        name: 'Samples/sec',
         type: 'line',
         yAxisIndex: 0,
-        data: history.map((entry) => (Number.isFinite(entry.aggregateTemp) ? entry.aggregateTemp : null)),
+        data: toSeries(historyValues(history, 'samplesPerSec')),
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: '#F97316' },
+        lineStyle: { width: 2, color: '#0EA5E9' },
+        areaStyle: { color: 'rgba(14, 165, 233, 0.14)' },
       },
       {
-        name: 'Power draw',
+        name: 'Step time (s)',
         type: 'line',
         yAxisIndex: 1,
-        data: history.map((entry) => (Number.isFinite(entry.aggregatePower) ? entry.aggregatePower : null)),
+        data: toSeries(historyValues(history, 'stepTime')),
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: '#22C55E' },
+        lineStyle: { width: 2, type: 'dashed', color: '#F97316' },
       },
     ],
     [history],
@@ -544,144 +689,70 @@ export default function Infrastructure() {
     () => [
       {
         name: 'Disk read MB/s',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.diskRead) ? entry.diskRead : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#0EA5E9' },
-        areaStyle: { color: 'rgba(14, 165, 233, 0.12)' },
+        type: 'bar',
+        stack: 'disk',
+        data: toSeries(historyValues(history, 'diskRead')),
+        itemStyle: { color: '#0EA5E9' },
       },
       {
         name: 'Disk write MB/s',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.diskWrite) ? entry.diskWrite : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#6366F1' },
+        type: 'bar',
+        stack: 'disk',
+        data: toSeries(historyValues(history, 'diskWrite')),
+        itemStyle: { color: '#6366F1' },
       },
       {
         name: 'Network RX MB/s',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.netRx) ? entry.netRx : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#10B981' },
+        type: 'bar',
+        stack: 'network',
+        data: toSeries(historyValues(history, 'netRx')),
+        itemStyle: { color: '#10B981' },
       },
       {
         name: 'Network TX MB/s',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.netTx) ? entry.netTx : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#F43F5E' },
+        type: 'bar',
+        stack: 'network',
+        data: toSeries(historyValues(history, 'netTx')),
+        itemStyle: { color: '#F43F5E' },
       },
     ],
     [history],
   );
 
-  const localInsightsSeries = useMemo(
+  const tempPowerSeries = useMemo(
     () => [
       {
-        name: 'Samples/sec',
+        name: 'Temperature',
         type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.samplesPerSec) ? entry.samplesPerSec : null)),
+        yAxisIndex: 0,
+        data: toSeries(historyValues(history, 'aggregateTemp')),
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: '#0EA5E9' },
+        lineStyle: { width: 2, color: '#F97316' },
       },
       {
-        name: 'Dataloader wait (s)',
+        name: 'Power draw',
         type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.dataloaderWait) ? entry.dataloaderWait : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#6A7286' },
-      },
-      {
-        name: 'Host-to-device transfer (s)',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.hostToDeviceTransfer) ? entry.hostToDeviceTransfer : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 1.5, type: 'dashed', color: '#F97316' },
-      },
-      {
-        name: 'CPU bottleneck score',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.cpuBottleneck) ? entry.cpuBottleneck : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#B4182D' },
-      },
-      {
-        name: 'Memory pressure',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.memoryPressureScore) ? entry.memoryPressureScore : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#84CC16' },
-      },
-      {
-        name: 'Disk I/O pressure',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.diskPressureScore) ? entry.diskPressureScore : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#14B8A6' },
-      },
-      {
-        name: 'Accelerator starvation',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.acceleratorStarvation) ? entry.acceleratorStarvation : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 1.5, color: '#F43F5E' },
-      },
-      {
-        name: 'Scaling readiness',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.scalingReadiness) ? entry.scalingReadiness : null)),
+        yAxisIndex: 1,
+        data: toSeries(historyValues(history, 'aggregatePower')),
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2, color: '#22C55E' },
       },
-      {
-        name: 'Host CPU',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.hostCpu) ? entry.hostCpu : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 1.5, color: '#37415C' },
-      },
-      {
-        name: 'Training process CPU',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.processCpu) ? entry.processCpu : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 1.5, type: 'dashed', color: '#FDA481' },
-      },
     ],
     [history],
   );
 
-  const clusterSeries = useMemo(
+  const scalingTrendSeries = useMemo(
     () => [
       {
-        name: 'Interconnect RX MB/s',
+        name: 'Scaling readiness',
         type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.clusterRx) ? entry.clusterRx : null)),
+        data: toSeries(historyValues(history, 'scalingReadiness')),
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 2, color: '#0EA5E9' },
-      },
-      {
-        name: 'Interconnect TX MB/s',
-        type: 'line',
-        data: history.map((entry) => (Number.isFinite(entry.clusterTx) ? entry.clusterTx : null)),
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#F43F5E' },
+        lineStyle: { width: 2, color: '#22C55E' },
+        areaStyle: { color: 'rgba(34, 197, 94, 0.14)' },
       },
     ],
     [history],
@@ -700,84 +771,258 @@ export default function Infrastructure() {
     [labels, utilizationSeries, textColor, gridColor],
   );
 
-  const memoryOptions = useMemo(
+  const samplesStepOptions = useMemo(
+    () => ({
+      animationDuration: 260,
+      animationDurationUpdate: 220,
+      tooltip: { trigger: 'axis' },
+      legend: { textStyle: { color: textColor }, top: 0 },
+      grid: { left: 52, right: 56, bottom: 36, top: 36 },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { color: textColor },
+        axisLine: { lineStyle: { color: gridColor } },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          min: 0,
+          axisLabel: { color: textColor },
+          name: 'Samples/s',
+          nameTextStyle: { color: textColor },
+          splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
+        },
+        {
+          type: 'value',
+          min: 0,
+          axisLabel: { color: textColor },
+          name: 'Step time (s)',
+          nameTextStyle: { color: textColor },
+          splitLine: { show: false },
+        },
+      ],
+      series: samplesStepSeries,
+    }),
+    [labels, samplesStepSeries, textColor, gridColor],
+  );
+
+  const throughputOptions = useMemo(
+    () => ({
+      animationDuration: 260,
+      animationDurationUpdate: 220,
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: { textStyle: { color: textColor }, top: 0 },
+      grid: { left: 48, right: 24, bottom: 36, top: 36 },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLabel: { color: textColor },
+        axisLine: { lineStyle: { color: gridColor } },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        axisLabel: { color: textColor },
+        name: 'MB/s',
+        nameTextStyle: { color: textColor },
+        splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
+      },
+      series: throughputSeries,
+    }),
+    [labels, throughputSeries, textColor, gridColor],
+  );
+
+  const scalingTrendOptions = useMemo(
     () =>
       buildLineOptions({
         labels,
-        series: memorySeries,
-        yAxisName: 'Pressure %',
+        series: scalingTrendSeries,
+        yAxisName: undefined,
         yAxisMax: 100,
         textColor,
         gridColor,
+        showLegend: false,
+        gridTop: 52,
       }),
-    [labels, memorySeries, textColor, gridColor],
+    [labels, scalingTrendSeries, textColor, gridColor],
   );
 
-  const thermalPowerOptions = useMemo(
+  const tempPowerOptions = useMemo(
     () =>
       buildLineOptions({
         labels,
-        series: thermalPowerSeries,
+        series: tempPowerSeries,
         yAxisName: 'Temperature °C',
         yAxisMax: 100,
         textColor,
         gridColor,
         dualAxis: true,
       }),
-    [labels, thermalPowerSeries, textColor, gridColor],
+    [labels, tempPowerSeries, textColor, gridColor],
   );
 
-  const throughputOptions = useMemo(
-    () =>
-      buildLineOptions({
-        labels,
-        series: throughputSeries,
-        yAxisName: 'Throughput MB/s',
-        textColor,
-        gridColor,
-      }),
-    [labels, throughputSeries, textColor, gridColor],
+  const memoryByAccelerator = useMemo(() => {
+    const rows = accelerators
+      .map((accelerator, idx) => {
+        const name = accelerator?.name || accelerator?.id || `Accelerator ${idx + 1}`;
+        const value = metricValue(getMetric(accelerator?.metrics, 'memory_pressure_percent'));
+        return {
+          name,
+          value: Number.isFinite(value) ? value : null,
+        };
+      })
+      .filter((row) => Number.isFinite(row.value));
+    return rows;
+  }, [accelerators]);
+
+  const vramPressureOptions = useMemo(
+    () => ({
+      animationDuration: 240,
+      animationDurationUpdate: 220,
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 48, right: 20, top: 18, bottom: 36 },
+      xAxis: {
+        type: 'value',
+        min: 0,
+        max: 100,
+        axisLabel: { color: textColor, formatter: '{value}%' },
+        splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: memoryByAccelerator.map((row) => row.name),
+        axisLabel: { color: textColor },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: memoryByAccelerator.map((row, idx) => ({
+            value: row.value,
+            itemStyle: { color: SERIES_COLORS[idx % SERIES_COLORS.length] },
+          })),
+          label: {
+            show: true,
+            position: 'right',
+            formatter: ({ value }) => (Number.isFinite(value) ? `${Number(value).toFixed(1)}%` : '—'),
+            color: textColor,
+          },
+        },
+      ],
+    }),
+    [memoryByAccelerator, textColor, gridColor],
   );
 
-  const localInsightsOptions = useMemo(
-    () =>
-      buildLineOptions({
-        labels,
-        series: localInsightsSeries,
-        yAxisName: 'Local metrics',
-        textColor,
-        gridColor,
-      }),
-    [labels, localInsightsSeries, textColor, gridColor],
+  const currentScalingReadiness = metricValue(getMetric(localInsights, 'scaling_readiness'));
+
+  const scalingGaugeOptions = useMemo(
+    () => ({
+      series: [
+        {
+          type: 'gauge',
+          min: 0,
+          max: 100,
+          splitNumber: 5,
+          progress: {
+            show: true,
+            width: 14,
+            itemStyle: {
+              color:
+                currentScalingReadiness == null
+                  ? '#6A7286'
+                  : currentScalingReadiness < THRESHOLDS.scaling_readiness.critical
+                    ? '#F43F5E'
+                    : currentScalingReadiness < THRESHOLDS.scaling_readiness.warn
+                      ? '#F59E0B'
+                      : '#22C55E',
+            },
+          },
+          axisLine: {
+            lineStyle: {
+              width: 14,
+              color: [[1, theme === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(55,65,92,0.15)']],
+            },
+          },
+          pointer: { show: false },
+          axisTick: { distance: -18, splitNumber: 4, lineStyle: { color: gridColor, width: 1 } },
+          splitLine: { distance: -20, length: 8, lineStyle: { color: gridColor, width: 1.5 } },
+          axisLabel: { color: textColor, distance: 14 },
+          detail: {
+            valueAnimation: true,
+            formatter: (value) => `${Number(value).toFixed(1)}%`,
+            color: textColor,
+            fontSize: 20,
+            offsetCenter: [0, '20%'],
+          },
+          title: { show: false, color: textColor, offsetCenter: [0, '62%'], fontSize: 12 },
+          data: [{ value: currentScalingReadiness || 0, name: 'Scaling readiness' }],
+        },
+      ],
+    }),
+    [currentScalingReadiness, theme, gridColor, textColor],
   );
 
-  const clusterOptions = useMemo(
-    () =>
-      buildLineOptions({
-        labels,
-        series: clusterSeries,
-        yAxisName: 'Interconnect MB/s',
-        textColor,
-        gridColor,
-      }),
-    [labels, clusterSeries, textColor, gridColor],
+  const insightsModel = useMemo(
+    () => computeInsights(localInsights, diagnostics, runState),
+    [localInsights, diagnostics, runState],
   );
 
-  const acceleratorHistoryByName = useMemo(() => {
-    const map = {};
-    const names = new Set();
-    history.forEach((entry) => Object.keys(entry.perAccelUtil || {}).forEach((name) => names.add(name)));
-    Array.from(names).forEach((name) => {
-      map[name] = {
-        labels,
-        values: history.map((entry) => {
-          const value = entry.perAccelUtil?.[name];
-          return Number.isFinite(value) ? value : null;
-        }),
-      };
-    });
-    return map;
-  }, [history, labels]);
+  const bottleneckOptions = useMemo(
+    () => ({
+      animationDuration: 240,
+      animationDurationUpdate: 220,
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 142, right: 16, top: 16, bottom: 24 },
+      xAxis: {
+        type: 'value',
+        min: 0,
+        max: 100,
+        axisLabel: { color: textColor, formatter: '{value}%' },
+        splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
+      },
+      yAxis: {
+        type: 'category',
+        data: insightsModel.bottleneckRanking.map((item) => item.label),
+        axisLabel: { color: textColor },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: insightsModel.bottleneckRanking.map((item) => item.value),
+          itemStyle: {
+            color: ({ value }) => {
+              if (value >= 85) return '#F43F5E';
+              if (value >= 60) return '#F59E0B';
+              return '#22C55E';
+            },
+          },
+          label: {
+            show: true,
+            position: 'right',
+            formatter: ({ value }) => (Number.isFinite(value) ? `${Number(value).toFixed(1)}%` : '—'),
+            color: textColor,
+          },
+        },
+      ],
+    }),
+    [insightsModel.bottleneckRanking, textColor, gridColor],
+  );
+
+  const hasUtilizationSamples = utilizationSeries.some((series) => hasFiniteValue(series.data));
+  const hasSamplesTrend = samplesStepSeries.some((series) => hasFiniteValue(series.data));
+  const hasThroughputSamples = throughputSeries.some((series) => hasFiniteValue(series.data));
+  const hasScalingTrend = scalingTrendSeries.some((series) => hasFiniteValue(series.data));
+  const hasTempPowerSamples = tempPowerSeries.some((series) => hasFiniteValue(series.data));
+  const samplesPerSecMetric = getMetric(localInsights, 'samples_per_sec');
+  const samplesTrendMessage = throughputWarmup
+    ? 'Samples/sec counters are warming up. Initial values may lag.'
+    : samplesPerSecMetric?.status && samplesPerSecMetric.status !== 'active'
+      ? `Samples/sec unavailable: ${samplesPerSecMetric.status_label || 'Not detected'}.`
+      : 'Waiting for samples-per-second data...';
+
+  const activeAcceleratorMode = ['cuda_active', 'mps_active', 'heterogeneous_active'].includes(v2?.accelerator_mode);
+  const hasAcceleratorSamples = history.some((entry) => Number.isFinite(entry.aggregateUtil)) || memoryByAccelerator.length > 0;
+  const showConditionalHardware = activeAcceleratorMode || hasAcceleratorSamples;
 
   if (!runId) {
     return <div className="p-6 text-theme-text-secondary">Run ID is missing.</div>;
@@ -787,22 +1032,8 @@ export default function Infrastructure() {
     return <div className="p-6 text-theme-text-secondary">Loading infrastructure telemetry...</div>;
   }
 
-  const panelMode = v2?.panel_mode || (telemetry?.mode === 'distributed' ? 'cluster' : 'local_insights');
-  const liveGuard = telemetry?.live_guard;
-  const liveGuardReasons = Array.isArray(liveGuard?.reasons) ? liveGuard.reasons : [];
-  const systemCpuMetric = getMetric(externalUsage, 'host_cpu_percent') || getMetric(host, 'system_cpu_percent');
-  const processCpuMetric = getMetric(externalUsage, 'process_cpu_percent') || getMetric(processMetrics, 'process_cpu_percent');
-  const processRamMetric = getMetric(externalUsage, 'process_ram_percent') || getMetric(processMetrics, 'process_ram_percent');
-  const systemRamMetric = getMetric(externalUsage, 'host_ram_percent') || getMetric(host, 'system_ram_percent');
-  const hasAcceleratorUtilization =
-    history.some((entry) => Number.isFinite(entry.aggregateUtil)) ||
-    history.some((entry) => Object.values(entry.perAccelUtil || {}).some((value) => Number.isFinite(value)));
-  const utilizationIsAccelerator = preferredLayout === 'accelerator_first' && hasAcceleratorUtilization;
-  const hasUtilizationSamples = utilizationSeries.some((series) => hasFiniteValue(series.data));
-  const hasMemorySamples = memorySeries.some((series) => hasFiniteValue(series.data));
-  const hasThroughputSamples = throughputSeries.some((series) => hasFiniteValue(series.data));
-  const hasLocalInsightsSamples = localInsightsSeries.some((series) => hasFiniteValue(series.data));
-  const hasClusterSamples = clusterSeries.some((series) => hasFiniteValue(series.data));
+  const latestSamplesPerSec = historyLatestValue(history, 'samplesPerSec');
+  const latestStepTime = historyLatestValue(history, 'stepTime');
 
   return (
     <div className="space-y-6">
@@ -811,26 +1042,31 @@ export default function Infrastructure() {
           <div>
             <h1 className="h2 text-theme-text-primary">Infrastructure Telemetry</h1>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Adaptive local telemetry with accelerator-aware rendering and graceful fallback behavior.
+              Row-based run health, performance, scaling, hardware, and diagnosis dashboard.
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Run <span className="font-mono">{runId}</span> · Last update {formatTimestamp(telemetry?.collected_at)} · Source{' '}
-              <span className="font-mono">{telemetry?.telemetry_v2?.source?.hostname || 'local-host'}</span>
+              <span className="font-mono">{v2?.source?.hostname || 'local-host'}</span>
             </p>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
+            <span className="badge text-indigo-700 bg-indigo-500/10 border-indigo-500/30 dark:text-indigo-300">
+              Mode: {telemetry?.mode === 'distributed' ? 'Distributed' : 'Local'}
+            </span>
+            <span className={`badge border ${modeStyle(v2?.accelerator_mode)}`}>{modeLabel(v2?.accelerator_mode)}</span>
             <StatusBadge status={runState?.status || 'idle'} />
+            <span className={`badge border ${HEALTH_STYLES[String(runState?.health_state || 'WARNING').toUpperCase()] || HEALTH_STYLES.WARNING}`}>
+              Health: {String(runState?.health_state || 'UNKNOWN').toUpperCase()}
+            </span>
             {runTerminal && (
               <span className="badge text-orange-700 bg-orange-500/10 border-orange-500/30 dark:text-orange-300">
                 Terminal snapshot
               </span>
             )}
-            <span className={`badge border ${modeStyle(v2?.accelerator_mode)}`}>{modeLabel(v2?.accelerator_mode)}</span>
-            <span className="badge text-indigo-700 bg-indigo-500/10 border-indigo-500/30 dark:text-indigo-300">
-              {telemetry?.mode === 'distributed' ? 'Distributed verified' : 'Local mode'}
-            </span>
           </div>
         </div>
+
         {runState?.status_reason && (
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">Run-state note: {runState.status_reason}</p>
         )}
@@ -842,171 +1078,332 @@ export default function Infrastructure() {
         </div>
       )}
 
-      {!liveGuard?.ok && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
-          <p className="font-semibold">Live guard is active.</p>
-          <p className="mt-1">Distributed cluster claims are suppressed until runtime evidence is fresh and consistent.</p>
-          {liveGuardReasons.length > 0 && (
-            <p className="mt-1 text-xs">
-              Reasons: <span className="font-mono">{liveGuardReasons.join(', ')}</span>
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <Cpu className="h-4 w-4 text-theme-accent" />
+          <h2 className="h3 text-theme-text-primary">Core Health</h2>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <CoreHealthCard
+            title="Training Process CPU"
+            icon={Activity}
+            metric={processCpuMetric}
+            labels={labels}
+            values={toSeries(historyValues(history, 'processCpu'))}
+            lineColor="#FDA481"
+            areaColor="rgba(253, 164, 129, 0.18)"
+            gridColor={gridColor}
+          />
+
+          <CoreHealthCard
+            title="Training Process RAM"
+            icon={HardDrive}
+            metric={processRamMetric}
+            labels={labels}
+            values={toSeries(historyValues(history, 'processRam'))}
+            lineColor="#B4182D"
+            areaColor="rgba(180, 24, 45, 0.16)"
+            gridColor={gridColor}
+          />
+
+          <CoreHealthCard
+            title="System CPU"
+            icon={Cpu}
+            metric={systemCpuMetric}
+            labels={labels}
+            values={toSeries(historyValues(history, 'hostCpu'))}
+            lineColor="#37415C"
+            areaColor="rgba(55, 65, 92, 0.15)"
+            gridColor={gridColor}
+          />
+
+          <CoreHealthCard
+            title="System RAM"
+            icon={Database}
+            metric={systemRamMetric}
+            labels={labels}
+            values={toSeries(historyValues(history, 'systemRam'))}
+            lineColor="#0EA5E9"
+            areaColor="rgba(14, 165, 233, 0.16)"
+            gridColor={gridColor}
+          />
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <Network className="h-4 w-4 text-theme-accent" />
+          <h2 className="h3 text-theme-text-primary">Performance</h2>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="card h-[390px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary flex items-center gap-2">
+              <Activity className="h-5 w-5 text-theme-accent" />
+              Step Cadence
+            </h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Samples/sec and derived step time (`step_time = 1 / samples_per_sec`) updated every 2s.
             </p>
-          )}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricTile title="System CPU" icon={Cpu} metric={systemCpuMetric} />
-        <MetricTile title="Training Process CPU" icon={Activity} metric={processCpuMetric} />
-        <MetricTile title="Training Process RAM" icon={HardDrive} metric={processRamMetric} />
-        <MetricTile title="System RAM" icon={HardDrive} metric={systemRamMetric} />
-        <MetricTile title="Accelerator Utilization" icon={Gauge} metric={getMetric(aggregate, 'utilization_percent')} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <MetricTile title="Accelerator Memory Pressure" icon={Database} metric={getMetric(aggregate, 'memory_pressure_percent')} />
-        <MetricTile
-          title="Memory Fragmentation"
-          icon={Database}
-          metric={getMetric(aggregate, 'memory_fragmentation_percent')}
-        />
-        <MetricTile title="Aggregate Power" icon={Zap} metric={getMetric(aggregate, 'power_watts')} />
-        <MetricTile title="Aggregate Temperature" icon={Thermometer} metric={getMetric(aggregate, 'temperature_c')} />
-        <MetricTile
-          title="Interconnect RX"
-          icon={Network}
-          metric={panelMode === 'cluster' ? getMetric(clusterMetrics, 'interconnect_rx_mb_s') : getMetric(aggregate, 'interconnect_rx_mb_s')}
-        />
-        <MetricTile
-          title={panelMode === 'cluster' ? 'Cluster Nodes' : 'Scaling Readiness'}
-          icon={panelMode === 'cluster' ? Server : BarChart3}
-          metric={
-            panelMode === 'cluster'
-              ? getMetric(clusterMetrics, 'cluster_nodes')
-              : getMetric(localInsights, 'scaling_readiness')
-          }
-        />
-      </div>
-
-      {accelerators.length > 0 && (
-        <div>
-          <h3 className="h3 text-theme-text-primary mb-3">Per-Accelerator Devices</h3>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-            {accelerators.map((accelerator, idx) => (
-              <AcceleratorCard
-                key={accelerator?.id || idx}
-                accelerator={accelerator}
-                historySeries={acceleratorHistoryByName[accelerator?.name || accelerator?.id] || { labels: [], values: [] }}
-                gridColor={gridColor}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="card h-[390px] flex flex-col">
-          <h3 className="h3 text-theme-text-primary flex items-center gap-2">
-            <Activity className="h-5 w-5 text-theme-accent" />
-            {utilizationIsAccelerator ? 'Utilization Trends' : 'External Usage Trends'}
-          </h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {utilizationIsAccelerator
-              ? 'Accelerator utilization with host/process overlays and smooth real-time updates.'
-              : 'Host/process usage fallback is active because accelerator series are sparse or unsupported.'}
-          </p>
-          <div className="mt-3 flex-1 min-h-0">
-            {hasUtilizationSamples ? (
-              <ReactECharts option={utilizationOptions} style={{ height: '100%', width: '100%' }} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                Waiting for usage samples...
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="card h-[390px] flex flex-col">
-          <h3 className="h3 text-theme-text-primary flex items-center gap-2">
-            <Database className="h-5 w-5 text-theme-accent" />
-            Memory Pressure
-          </h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Host and process RAM are always plotted; accelerator memory overlays appear when available.
-          </p>
-          <div className="mt-3 flex-1 min-h-0">
-            {hasMemorySamples ? (
-              <ReactECharts option={memoryOptions} style={{ height: '100%', width: '100%' }} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                Waiting for memory samples...
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="card h-[390px] flex flex-col">
-          <h3 className="h3 text-theme-text-primary flex items-center gap-2">
-            <Thermometer className="h-5 w-5 text-theme-accent" />
-            Thermal + Power
-          </h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Dual-axis thermal and power trends where platform counters are available.
-          </p>
-          <div className="mt-3 flex-1 min-h-0">
-            <ReactECharts option={thermalPowerOptions} style={{ height: '100%', width: '100%' }} />
-          </div>
-        </div>
-
-        <div className="card h-[390px] flex flex-col">
-          <h3 className="h3 text-theme-text-primary flex items-center gap-2">
-            <Network className="h-5 w-5 text-theme-accent" />
-            Disk + Network Throughput
-          </h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            {throughputWarmup
-              ? 'Rate counters are warming up. Showing safe zero baseline until the next sample.'
-              : 'Host I/O throughput for diagnosing local bottlenecks.'}
-          </p>
-          <div className="mt-3 flex-1 min-h-0">
-            {hasThroughputSamples ? (
-              <ReactECharts option={throughputOptions} style={{ height: '100%', width: '100%' }} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                Waiting for throughput samples...
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="card h-[390px] flex flex-col">
-        <h3 className="h3 text-theme-text-primary flex items-center gap-2">
-          {panelMode === 'cluster' ? <Server className="h-5 w-5 text-theme-accent" /> : <BarChart3 className="h-5 w-5 text-theme-accent" />}
-          {panelMode === 'cluster' ? 'Cluster / Interconnect Bandwidth' : 'Local Performance Insights'}
-        </h3>
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-          {panelMode === 'cluster'
-            ? 'Distributed mode verified. Showing interconnect telemetry for multi-node or multi-rank activity.'
-            : 'No verified cluster connection. Showing local bottleneck and scaling readiness insights.'}
-        </p>
-        <div className="mt-3 flex-1 min-h-0">
-          {panelMode === 'cluster' ? (
-            hasClusterSamples ? (
-              <ReactECharts option={clusterOptions} style={{ height: '100%', width: '100%' }} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                Waiting for cluster interconnect samples...
-              </div>
-            )
-          ) : hasLocalInsightsSamples ? (
-            <ReactECharts option={localInsightsOptions} style={{ height: '100%', width: '100%' }} />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-              Waiting for local insight samples...
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <span className="badge text-sky-700 bg-sky-500/10 border-sky-500/30 dark:text-sky-300">
+                Samples/s: {Number.isFinite(latestSamplesPerSec) ? formatNumber(latestSamplesPerSec, 2) : '—'}
+              </span>
+              <span className="badge text-orange-700 bg-orange-500/10 border-orange-500/30 dark:text-orange-300">
+                Step time: {Number.isFinite(latestStepTime) ? `${formatNumber(latestStepTime, 4)}s` : '—'}
+              </span>
             </div>
-          )}
+            <div className="mt-3 flex-1 min-h-0">
+              {hasSamplesTrend ? (
+                <ReactECharts option={samplesStepOptions} style={{ height: '100%', width: '100%' }} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  {samplesTrendMessage}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card h-[390px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-theme-accent" />
+              Disk + Network Throughput Mix
+            </h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Grouped stacked bars for storage and network throughput.
+            </p>
+            {throughputWarmup && (
+              <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                Throughput counters are warming up. Early samples may include safe zero baselines.
+              </p>
+            )}
+            <div className="mt-3 flex-1 min-h-0">
+              {hasThroughputSamples ? (
+                <ReactECharts option={throughputOptions} style={{ height: '100%', width: '100%' }} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  Waiting for throughput samples...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <Gauge className="h-4 w-4 text-theme-accent" />
+          <h2 className="h3 text-theme-text-primary">Scaling Readiness</h2>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="card h-[390px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary">Readiness Gauge + Trend</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Warning below 60%, critical below 40%.
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 flex-1 min-h-0">
+              <div className="h-full min-h-[160px]">
+                <ReactECharts option={scalingGaugeOptions} style={{ width: '100%', height: '100%' }} />
+                <p className="mt-1 text-center text-xs text-slate-500 dark:text-slate-400">Scaling readiness</p>
+              </div>
+              <div className="h-full min-h-[160px]">
+                {hasScalingTrend ? (
+                  <ReactECharts option={scalingTrendOptions} style={{ width: '100%', height: '100%' }} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                    Waiting for scaling trend samples...
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="card h-[390px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary">Bottleneck Score Snapshot</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Heuristic penalty scores feeding scaling readiness.
+            </p>
+
+            <div className="mt-4 space-y-4">
+              {[
+                { label: 'CPU bottleneck', key: 'cpuBottleneck', warn: THRESHOLDS.cpu_bottleneck_score.warn, critical: THRESHOLDS.cpu_bottleneck_score.critical },
+                { label: 'Memory pressure', key: 'memoryPressure', warn: THRESHOLDS.memory_pressure.warn, critical: THRESHOLDS.memory_pressure.critical },
+                { label: 'Disk I/O pressure', key: 'diskPressure', warn: THRESHOLDS.disk_io_pressure.warn, critical: THRESHOLDS.disk_io_pressure.critical },
+                {
+                  label: 'Accelerator starvation',
+                  key: 'acceleratorStarvation',
+                  warn: THRESHOLDS.accelerator_starvation_idle.warn,
+                  critical: THRESHOLDS.accelerator_starvation_idle.critical,
+                },
+              ].map((row) => {
+                const value = historyLatestValue(history, row.key);
+                const severity = severityFromHighThreshold(value, row.warn, row.critical);
+                const barColor = severity === 'critical' ? '#F43F5E' : severity === 'warning' ? '#F59E0B' : '#22C55E';
+
+                return (
+                  <div key={row.key}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="text-theme-text-primary">{row.label}</span>
+                      <span className="font-mono text-theme-text-primary">{Number.isFinite(value) ? `${formatNumber(value, 1)}%` : '—'}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-theme-border/40 overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${clampPercent(value)}%`, backgroundColor: barColor }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <Server className="h-4 w-4 text-theme-accent" />
+          <h2 className="h3 text-theme-text-primary">Conditional Hardware</h2>
+        </div>
+
+        {showConditionalHardware ? (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="card h-[360px] flex flex-col lg:col-span-2">
+              <h3 className="h3 text-theme-text-primary">GPU/MPS Utilization</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Aggregate and per-accelerator utilization trends.
+              </p>
+              <div className="mt-3 flex-1 min-h-0">
+                {hasUtilizationSamples ? (
+                  <ReactECharts option={utilizationOptions} style={{ width: '100%', height: '100%' }} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                    Waiting for accelerator utilization samples...
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card h-[360px] flex flex-col">
+              <h3 className="h3 text-theme-text-primary">VRAM Pressure</h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Current memory pressure by accelerator.
+              </p>
+              <div className="mt-3 flex-1 min-h-0">
+                {memoryByAccelerator.length > 0 ? (
+                  <ReactECharts option={vramPressureOptions} style={{ width: '100%', height: '100%' }} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                    VRAM pressure is unavailable on this platform.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card h-[360px] flex flex-col lg:col-span-3">
+              <h3 className="h3 text-theme-text-primary flex items-center gap-2">
+                <Thermometer className="h-5 w-5 text-theme-accent" />
+                Temperature + Power
+              </h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Dual-axis thermal and power trends from aggregate accelerator telemetry.
+              </p>
+              <div className="mt-3 flex-1 min-h-0">
+                {hasTempPowerSamples ? (
+                  <ReactECharts option={tempPowerOptions} style={{ width: '100%', height: '100%' }} />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                    Thermal/power counters are unavailable on this platform.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="card">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+              <Server className="h-4 w-4 text-theme-accent" />
+              <p className="text-sm font-medium">No active accelerator telemetry detected.</p>
+            </div>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              Running in CPU-only mode or accelerator counters are unsupported. Core health and performance rows remain active.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-theme-accent" />
+          <h2 className="h3 text-theme-text-primary">Insights</h2>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="card h-[360px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary">Bottleneck Diagnosis</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Higher bars indicate stronger contribution to training slowdown.
+            </p>
+            <div className="mt-3 flex-1 min-h-0">
+              {insightsModel.bottleneckRanking.length > 0 ? (
+                <ReactECharts option={bottleneckOptions} style={{ width: '100%', height: '100%' }} />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  Bottleneck metrics are not available yet.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card h-[360px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary">Warnings</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Heuristic and diagnostic warnings derived from current telemetry.
+            </p>
+            <div className="mt-3 flex-1 overflow-auto space-y-2">
+              {insightsModel.warnings.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-emerald-700 dark:text-emerald-300">
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  No active warnings.
+                </div>
+              ) : (
+                insightsModel.warnings.map((warning, idx) => (
+                  <div key={`${warning.title}-${idx}`} className="rounded-lg border border-theme-border/40 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-theme-text-primary">{warning.title}</p>
+                      <SeverityBadge severity={warning.severity} />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{warning.message}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Source: <span className="font-mono">{warning.source}</span>
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="card h-[360px] flex flex-col">
+            <h3 className="h3 text-theme-text-primary">Recommended Fixes</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Actionable next steps based on active warning rules.
+            </p>
+            <div className="mt-3 flex-1 overflow-auto">
+              {insightsModel.recommendations.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                  No intervention recommended right now.
+                </div>
+              ) : (
+                <ol className="space-y-2 text-sm text-theme-text-primary list-decimal pl-5">
+                  {insightsModel.recommendations.map((item, idx) => (
+                    <li key={`fix-${idx}`}>{item}</li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1023,7 +1420,7 @@ export default function Infrastructure() {
             <span className="font-mono">{v2?.source?.server_pid || '—'}</span>
           </p>
           <div className="rounded-lg border border-theme-border/30 bg-theme-bg/40 p-3">
-            <p className="font-semibold text-theme-text-primary">Legend</p>
+            <p className="font-semibold text-theme-text-primary">Metric Status Legend</p>
             <div className="mt-2 grid grid-cols-1 gap-1 md:grid-cols-2">
               {Object.entries(v2?.metric_status_legend || {}).map(([key, label]) => (
                 <p key={key}>
@@ -1032,11 +1429,12 @@ export default function Infrastructure() {
               ))}
             </div>
           </div>
-          {Array.isArray(v2?.diagnostics) && v2.diagnostics.length > 0 && (
+
+          {diagnostics.length > 0 && (
             <div className="rounded-lg border border-theme-border/30 bg-theme-bg/40 p-3">
               <p className="font-semibold text-theme-text-primary">Diagnostics</p>
               <div className="mt-2 space-y-2">
-                {v2.diagnostics.map((diag, idx) => (
+                {diagnostics.map((diag, idx) => (
                   <div key={`${diag?.scope || 'diag'}-${idx}`} className="rounded border border-theme-border/30 p-2">
                     <p>
                       <span className="font-semibold">{diag?.scope || 'scope'}</span> · <span className="font-mono">{diag?.status || 'unknown'}</span>

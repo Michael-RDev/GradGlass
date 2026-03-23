@@ -35,8 +35,12 @@ class ArtifactStore:
         state_path = self.root / "runs" / run_id / "runtime_state.json"
         if not state_path.exists():
             return None
-        with open(state_path) as f:
-            return json.load(f)
+        try:
+            with open(state_path) as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except (json.JSONDecodeError, OSError):
+            return None
 
     def list_runs(self):
         runs = []
@@ -108,12 +112,12 @@ class ArtifactStore:
 
     def load_checkpoint(self, run_id, step):
         ckpt_dir = self.root / "runs" / run_id / "checkpoints"
-        # Try numpy checkpoint first (deep learning)
+        # Try NumPy checkpoint first.
         npz_path = ckpt_dir / f"step_{step}.npz"
         if npz_path.exists():
             data = np.load(str(npz_path))
             return dict(data)
-        # Fall back to joblib/pickle checkpoint (sklearn / XGBoost)
+        # Fall back to legacy pickle-style checkpoints.
         pkl_path = ckpt_dir / f"step_{step}.pkl"
         if pkl_path.exists():
             try:
@@ -139,22 +143,6 @@ class ArtifactStore:
             except (ValueError, json.JSONDecodeError):
                 continue
         return summaries
-
-    def get_sklearn_diagnostics(self, run_id):
-        grad_dir = self.root / "runs" / run_id / "gradients"
-        if not grad_dir.exists():
-            return []
-
-        diagnostics = []
-        for f_path in sorted(grad_dir.glob("sklearn_diagnostics_step_*.json")):
-            try:
-                step = int(f_path.stem.split("_")[-1])
-                with open(f_path) as f:
-                    data = json.load(f)
-                diagnostics.append({"step": step, **data})
-            except (ValueError, json.JSONDecodeError):
-                continue
-        return diagnostics
 
     def get_activation_stats(self, run_id):
         act_dir = self.root / "runs" / run_id / "activations"

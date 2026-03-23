@@ -540,21 +540,29 @@ class TestRunWatch:
         assert _load_runtime_state(run)["monitor_enabled"] is False
         run.finish(open=False, analyze=False)
 
-    def test_watch_infers_total_steps_from_model_attributes(self, tmp_store, model, optimizer):
-        model.n_estimators = 123
+    def test_watch_does_not_infer_total_steps_from_model_attributes(self, tmp_store, model, optimizer):
+        model.total_steps = 123
         run = Run(name="watch-model-steps", store=tmp_store)
         run.watch(model, optimizer, monitor=False)
         state = _load_runtime_state(run)
-        assert state["total_steps"] == 123
+        assert "total_steps" not in state
         run.finish(open=False, analyze=False)
 
-    def test_watch_prefers_config_total_steps_over_model_attributes(self, tmp_store, model, optimizer):
-        model.n_estimators = 999
+    def test_watch_uses_config_total_steps_when_provided(self, tmp_store, model, optimizer):
         run = Run(name="watch-config-steps", store=tmp_store, total_steps=42)
         run.watch(model, optimizer, monitor=False)
         state = _load_runtime_state(run)
         assert state["total_steps"] == 42
         run.finish(open=False, analyze=False)
+
+    def test_watch_rejects_unsupported_framework(self, tmp_store):
+        run = Run(name="unsupported-fw", store=tmp_store)
+
+        class PlainModel:
+            pass
+
+        with pytest.raises(RuntimeError, match="supports only PyTorch and TensorFlow/Keras"):
+            run.watch(PlainModel(), optimizer=None)
 
 
 class TestRunLogging:
@@ -742,6 +750,27 @@ class TestFrameworkDetection:
             pass
 
         assert run.detectframework(PlainModel()) == "unknown"
+
+    def test_detects_tensorflow_from_module_name(self, tmp_store):
+        run = Run(name="fw", store=tmp_store)
+
+        class FakeKerasModel:
+            __module__ = "tensorflow.keras.engine.training"
+
+        assert run.detectframework(FakeKerasModel()) == "tensorflow"
+
+
+class TestRemovedIntegrationApis:
+    def test_removed_callback_methods_are_not_available(self, tmp_store):
+        run = Run(name="removed-callbacks", store=tmp_store)
+        callback_names = ["xg" + "boost_callback", "light" + "gbm_callback"]
+        for callback_name in callback_names:
+            assert not hasattr(run, callback_name)
+
+    def test_fit_raises_guidance_error(self, tmp_store):
+        run = Run(name="fit-disabled", store=tmp_store)
+        with pytest.raises(RuntimeError, match="run.fit\\(\\) is not supported"):
+            run.fit(np.zeros((4, 3), dtype=np.float32), np.zeros((4,), dtype=np.int64))
 
 
 class TestJsonDefault:

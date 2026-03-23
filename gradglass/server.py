@@ -27,14 +27,12 @@ def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[l
 
     metric_rows = metrics if metrics is not None else store.get_metrics(run_id)
     runtime_state = store.get_runtime_state(run_id)
-    sklearn_diagnostics = store.get_sklearn_diagnostics(run_id)
 
     return build_overview_snapshot(
         run_id=run_id,
         metadata=meta,
         metrics=metric_rows,
         runtime_state=runtime_state,
-        sklearn_diagnostics=sklearn_diagnostics,
     )
 
 
@@ -59,7 +57,6 @@ def create_app(store):
                     metadata=run,
                     metrics=store.get_metrics(run_id),
                     runtime_state=store.get_runtime_state(run_id),
-                    sklearn_diagnostics=store.get_sklearn_diagnostics(run_id),
                 )
                 run["status"] = overview.get("status", normalize_run_status(run.get("status")))
                 run["health_state"] = overview.get("health_state")
@@ -87,7 +84,6 @@ def create_app(store):
             metadata=meta,
             metrics=store.get_metrics(run_id),
             runtime_state=store.get_runtime_state(run_id),
-            sklearn_diagnostics=store.get_sklearn_diagnostics(run_id),
         )
         meta["run_id"] = run_id
         meta["status"] = overview.get("status", normalize_run_status(meta.get("status")))

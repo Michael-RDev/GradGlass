@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { fetchRun, fetchMetrics, fetchAlerts, fetchOverview, createMetricsStream } from '../api';
+import { DEFAULT_METRIC_EXCLUDE_KEYS, rankMetricKeys } from '../utils';
 
 const useRunStore = create((set, get) => ({
   activeRunId: null,
@@ -51,15 +52,7 @@ const useRunStore = create((set, get) => ({
   discoverMetricKeys: () => {
     const { metrics } = get();
     if (!metrics || metrics.length === 0) return [];
-    const keys = new Set();
-    metrics.forEach(m => {
-      Object.keys(m).forEach(k => {
-        if (k !== 'step' && k !== 'timestamp') {
-          keys.add(k);
-        }
-      });
-    });
-    return Array.from(keys).sort();
+    return rankMetricKeys(metrics, { excludeKeys: DEFAULT_METRIC_EXCLUDE_KEYS });
   }
 }));
 

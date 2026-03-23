@@ -97,6 +97,7 @@ def main():
     run = gg.run(
         "transfer-learning",
         lr_head=LR_HEAD,
+        monitor=True,
         lr_finetune=LR_FINETUNE,
         phase1_epochs=PHASE1_EPOCHS,
         phase2_epochs=PHASE2_EPOCHS,

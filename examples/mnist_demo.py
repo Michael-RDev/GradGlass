@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 import torch
 import torch.nn as nn
@@ -59,6 +60,7 @@ def train_epoch(model, loader, optimizer, run, epoch):
     model.train()
     (total_loss, correct, total) = (0.0, 0, 0)
     for x, y in loader:
+        batch_start = time.perf_counter()
         (x, y) = (x.to(DEVICE), y.to(DEVICE))
         optimizer.zero_grad()
         logits = model(x)
@@ -69,10 +71,12 @@ def train_epoch(model, loader, optimizer, run, epoch):
         preds = logits.argmax(dim=1)
         batch_correct = (preds == y).sum().item()
         batch_total = y.size(0)
+        elapsed_s = max(time.perf_counter() - batch_start, 1e-9)
+        samples_per_sec = batch_total / elapsed_s
         total_loss += batch_loss * batch_total
         correct += batch_correct
         total += batch_total
-        run.log(loss=batch_loss, acc=batch_correct / batch_total, epoch=epoch)
+        run.log(loss=batch_loss, acc=batch_correct / batch_total, epoch=epoch, samples_per_sec=samples_per_sec)
         run.log_batch(x=x, y=y, y_pred=logits, loss=loss)
     return (total_loss / total, correct / total)
 

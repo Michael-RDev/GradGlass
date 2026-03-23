@@ -13,7 +13,7 @@ function pickChartKeys(metrics) {
   const sample = metrics.find(m => Object.keys(m).length > 2) || metrics[0]
   const skip = new Set(['step', 'timestamp', 'fit_duration_s'])
   const allKeys = Object.keys(sample).filter(k => !skip.has(k) && typeof sample[k] === 'number')
-  // Prefer loss-like keys (neural nets) or eval-metric keys (XGBoost/LightGBM)
+  // Prefer loss-like keys, then other numeric metrics.
   const lossKeys = allKeys.filter(k =>
     k === 'loss' || k.includes('loss') || k.includes('logloss') ||
     k.includes('rmse') || k.includes('error') || k.includes('auc')
@@ -51,15 +51,12 @@ export default function StoryMode() {
 
   const { run, evalLab, metrics, analysis } = data
   const latestEval = evalLab?.evaluations?.[evalLab.evaluations.length - 1]
-  const isBoosting = ['xgboost', 'lightgbm', 'sklearn'].includes(run.framework)
 
   // Status computation — checked in priority order
   let healthStatus = 'Healthy'
   let Icon = CheckCircle2
   let color = 'text-emerald-400'
-  let healthReason = isBoosting
-    ? 'Ensemble training completed successfully. Check Performance for accuracy / F1 scores and Architecture for feature importances.'
-    : 'Training is progressing normally. Loss is decreasing and no unstable gradients detected.'
+  let healthReason = 'Training is progressing normally. Loss is decreasing and no unstable gradients detected.'
 
   // 1. Hard failure from run status
   if (run.status === 'failed') {
@@ -105,7 +102,7 @@ export default function StoryMode() {
     }
 
   // 3. Fallback: check val_loss trend directly from metrics
-  } else if (!isBoosting && metrics && metrics.length > 5) {
+  } else if (metrics && metrics.length > 5) {
     const valLosses = metrics.filter(m => m.val_loss != null).map(m => m.val_loss)
     if (valLosses.length >= 4) {
       const half = valLosses.slice(Math.floor(valLosses.length / 2))
@@ -172,7 +169,7 @@ export default function StoryMode() {
                 View Diagnostic Report
               </Link>
               <Link to={`/run/${runId}/architecture`} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 transition-colors rounded-lg text-sm font-medium text-slate-200">
-                {isBoosting ? '🌲 View Trees & Importances' : 'View Architecture'}
+                View Architecture
               </Link>
             </div>
           </div>

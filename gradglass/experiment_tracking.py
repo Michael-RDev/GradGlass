@@ -37,14 +37,10 @@ RUN_STATUS_ALIASES = {
 
 
 class BaseExperimentAdapter:
-    """Normalize run metadata + logged metrics into an overview snapshot."""
-
     train_loss_candidates: tuple[str, ...] = (
         "loss",
         "train_loss",
         "training_loss",
-        "train_logloss",
-        "train_mlogloss",
         "train_rmse",
         "train_mae",
         "train_mse",
@@ -54,11 +50,9 @@ class BaseExperimentAdapter:
         "validation_loss",
         "valid_loss",
         "test_loss",
-        "validation_0_logloss",
-        "validation_0_mlogloss",
-        "validation_0_rmse",
-        "validation_0_mae",
-        "validation_0_mse",
+        "val_rmse",
+        "val_mae",
+        "val_mse",
     )
     lr_candidates: tuple[str, ...] = ("lr", "learning_rate")
 
@@ -70,7 +64,6 @@ class BaseExperimentAdapter:
         metadata: dict[str, Any],
         metrics: list[dict[str, Any]],
         runtime_state: Optional[dict[str, Any]],
-        sklearn_diagnostics: list[dict[str, Any]],
         now_ts: Optional[float] = None,
     ):
         self.run_id = run_id
@@ -78,7 +71,6 @@ class BaseExperimentAdapter:
         self.metadata = metadata or {}
         self.metrics = metrics or []
         self.runtime_state = runtime_state or {}
-        self.sklearn_diagnostics = sklearn_diagnostics or []
         self.now_ts = float(now_ts) if now_ts is not None else time.time()
 
     def build_snapshot(self) -> dict[str, Any]:
@@ -99,7 +91,9 @@ class BaseExperimentAdapter:
         eta_s, eta_reason = self._estimate_eta(status=status, current_step=current_step, total_steps=total_steps)
 
         heartbeat_ts = self._resolve_heartbeat()
-        monitor_enabled = bool(self.runtime_state.get("monitor_enabled", self.metadata.get("config", {}).get("monitor", False)))
+        monitor_enabled = bool(
+            self.runtime_state.get("monitor_enabled", self.metadata.get("config", {}).get("monitor", False))
+        )
         resource_tracking_available = bool(self.runtime_state.get("resource_tracking_available", False))
 
         health_state = self._compute_health(
@@ -197,26 +191,12 @@ class BaseExperimentAdapter:
         if epoch_total and epoch_total > 0:
             return epoch_total, "epoch_inference"
 
-        diagnostics_total = self._infer_total_steps_from_diagnostics()
-        if diagnostics_total and diagnostics_total > 0:
-            return diagnostics_total, "diagnostics"
-
         # If this run is already complete and we do not have a better estimate,
         # current step is the only truthful total we can report.
         status, _, _ = self._resolve_status()
         if status == "completed" and current_step > 0:
             return current_step, "completion_fallback"
         return None, "unknown"
-
-    def _infer_total_steps_from_diagnostics(self) -> Optional[int]:
-        for diag in reversed(self.sklearn_diagnostics):
-            n_iter = _safe_int(diag.get("n_iter"))
-            if n_iter and n_iter > 0:
-                return n_iter
-            loss_curve = diag.get("loss_curve")
-            if isinstance(loss_curve, list) and loss_curve:
-                return len(loss_curve)
-        return None
 
     def _resolve_elapsed_time(self) -> float:
         start_ts = _safe_float(self.runtime_state.get("start_time_epoch"))
@@ -288,7 +268,9 @@ class BaseExperimentAdapter:
             return []
         return [[1.0, static_lr], [float(current_step), static_lr]]
 
-    def _estimate_eta(self, *, status: str, current_step: int, total_steps: Optional[int]) -> tuple[Optional[float], Optional[str]]:
+    def _estimate_eta(
+        self, *, status: str, current_step: int, total_steps: Optional[int]
+    ) -> tuple[Optional[float], Optional[str]]:
         if status == "completed":
             return 0.0, None
         if status == "failed":
@@ -312,12 +294,7 @@ class BaseExperimentAdapter:
         return max(0.0, remaining_steps * step_seconds), None
 
     def _compute_health(
-        self,
-        *,
-        status: str,
-        heartbeat_ts: Optional[float],
-        current_step: int,
-        resource_tracking_available: bool,
+        self, *, status: str, heartbeat_ts: Optional[float], current_step: int, resource_tracking_available: bool
     ) -> str:
         if self.runtime_state.get("fatal_exception"):
             return "FAILED"
@@ -365,102 +342,6 @@ class TensorFlowExperimentAdapter(BaseExperimentAdapter):
     lr_candidates = ("lr", "learning_rate")
 
 
-class SklearnExperimentAdapter(BaseExperimentAdapter):
-    train_loss_candidates = (
-        "loss",
-        "train_loss",
-        "validation_0_logloss",
-        "validation_0_mlogloss",
-        "validation_0_rmse",
-        "validation_0_mae",
-        "validation_0_mse",
-    )
-
-    def _resolve_current_step(self) -> int:
-        step = super()._resolve_current_step()
-        if step > 0:
-            return step
-
-        for diag in reversed(self.sklearn_diagnostics):
-            n_iter = _safe_int(diag.get("n_iter"))
-            if n_iter and n_iter > 0:
-                return n_iter
-            loss_curve = diag.get("loss_curve")
-            if isinstance(loss_curve, list) and loss_curve:
-                return len(loss_curve)
-        return 0
-
-    def _resolve_loss_history(self) -> Series:
-        series = super()._resolve_loss_history()
-        if series:
-            return series
-
-        for diag in reversed(self.sklearn_diagnostics):
-            loss_curve = diag.get("loss_curve")
-            if not isinstance(loss_curve, list) or not loss_curve:
-                continue
-            out: Series = []
-            for idx, value in enumerate(loss_curve, start=1):
-                val = _safe_float(value)
-                if val is None:
-                    continue
-                out.append([float(idx), val])
-            if out:
-                return out
-        return []
-
-
-class XGBoostExperimentAdapter(BaseExperimentAdapter):
-    train_loss_candidates = (
-        "train_logloss",
-        "train_mlogloss",
-        "train_rmse",
-        "train_mae",
-        "train_mse",
-        "train_error",
-    )
-    val_loss_candidates = (
-        "validation_0_logloss",
-        "validation_0_mlogloss",
-        "validation_0_rmse",
-        "validation_0_mae",
-        "validation_0_mse",
-        "test_logloss",
-        "test_mlogloss",
-        "test_rmse",
-        "test_mae",
-        "test_mse",
-        "test_error",
-    )
-
-    def _resolve_loss_history(self) -> Series:
-        series = super()._resolve_loss_history()
-        if series:
-            return series
-
-        # Dynamic fallback: first train_* metric with enough points.
-        for key in _discover_metric_keys(self.metrics):
-            low = key.lower()
-            if low.startswith("train_"):
-                series = _series_from_metrics(self.metrics, key)
-                if len(series) >= 2:
-                    return series
-        return []
-
-    def _resolve_val_loss_history(self) -> Series:
-        series = super()._resolve_val_loss_history()
-        if series:
-            return series
-
-        for key in _discover_metric_keys(self.metrics):
-            low = key.lower()
-            if low.startswith("validation_") or low.startswith("test_"):
-                series = _series_from_metrics(self.metrics, key)
-                if len(series) >= 2:
-                    return series
-        return []
-
-
 _ADAPTER_REGISTRY: dict[str, type[BaseExperimentAdapter]] = {}
 
 
@@ -478,19 +359,8 @@ def get_experiment_adapter(framework: str) -> type[BaseExperimentAdapter]:
 
 def infer_framework_for_tracking(metadata: dict[str, Any], metrics: list[dict[str, Any]]) -> str:
     fw = str((metadata or {}).get("framework") or "").strip().lower()
-    if fw and fw != "unknown":
-        return fw
-
-    config = (metadata or {}).get("config") or {}
-    if any(k in config for k in ("objective", "eta", "num_boost_round")):
-        return "xgboost"
-
-    keys = _discover_metric_keys(metrics)
-    if any(k.startswith("train_") for k in keys) and any("logloss" in k or "rmse" in k for k in keys):
-        return "xgboost"
-    if any(k.startswith("validation_") for k in keys):
-        return "xgboost"
-
+    if fw == "keras":
+        return "tensorflow"
     return fw or "unknown"
 
 
@@ -503,10 +373,7 @@ def infer_total_steps_from_config(config: dict[str, Any]) -> Optional[int]:
         "max_steps",
         "num_steps",
         "steps",
-        "num_boost_round",
-        "n_estimators",
         "max_iter",
-        "num_iterations",
         "num_train_steps",
         "train_steps",
         "total_train_steps",
@@ -589,7 +456,6 @@ def build_overview_snapshot(
     metadata: dict[str, Any],
     metrics: list[dict[str, Any]],
     runtime_state: Optional[dict[str, Any]],
-    sklearn_diagnostics: Optional[list[dict[str, Any]]] = None,
     now_ts: Optional[float] = None,
 ) -> dict[str, Any]:
     framework = infer_framework_for_tracking(metadata, metrics)
@@ -600,7 +466,6 @@ def build_overview_snapshot(
         metadata=metadata,
         metrics=metrics,
         runtime_state=runtime_state,
-        sklearn_diagnostics=sklearn_diagnostics or [],
         now_ts=now_ts,
     )
     return adapter.build_snapshot()
@@ -800,6 +665,3 @@ def _metric_epoch_value(metric: dict[str, Any]) -> Optional[int]:
 register_experiment_adapter("pytorch", PyTorchExperimentAdapter)
 register_experiment_adapter("tensorflow", TensorFlowExperimentAdapter)
 register_experiment_adapter("keras", TensorFlowExperimentAdapter)
-register_experiment_adapter("sklearn", SklearnExperimentAdapter)
-register_experiment_adapter("xgboost", XGBoostExperimentAdapter)
-register_experiment_adapter("lightgbm", XGBoostExperimentAdapter)

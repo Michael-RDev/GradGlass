@@ -50,6 +50,25 @@ def _seed_run(store: ArtifactStore, run_id: str) -> Path:
     return run_dir
 
 
+def _seed_legacy_run(store: ArtifactStore, run_id: str) -> Path:
+    run_dir = store.ensure_run_dir(run_id)
+    meta = {
+        "name": "legacy-overview-run",
+        "run_id": run_id,
+        "framework": "legacy_tree_model",
+        "status": "complete",
+        "start_time_epoch": 80.0,
+        "config": {"max_steps": 2},
+    }
+    (run_dir / "metadata.json").write_text(json.dumps(meta))
+    with open(run_dir / "metrics.jsonl", "w") as f:
+        f.write(json.dumps({"step": 1, "timestamp": 81.0, "loss": 0.8}) + "\n")
+        f.write(json.dumps({"step": 2, "timestamp": 82.0, "loss": 0.7}) + "\n")
+    (run_dir / "runtime_state.json").write_text(json.dumps({"status": "complete", "heartbeat_ts": 82.0, "current_step": 2}))
+    (run_dir / "model_structure.json").write_text(json.dumps({"layers": [{"id": "root", "type": "legacy"}], "edges": []}))
+    return run_dir
+
+
 def test_overview_endpoint_returns_normalized_snapshot(tmp_store):
     run_id = "overview-api-run"
     _seed_run(tmp_store, run_id)
@@ -67,7 +86,6 @@ def test_overview_endpoint_returns_normalized_snapshot(tmp_store):
         "runtime",
         "config",
         "epoch_inference",
-        "diagnostics",
         "completion_fallback",
         "unknown",
     }
@@ -141,6 +159,13 @@ def test_infrastructure_endpoint_returns_metric_payload(tmp_store):
     assert v2["graph_hints"]["preferred_layout"] in {"host_process_first", "accelerator_first"}
     assert isinstance(v2["graph_hints"]["run_terminal"], bool)
     assert isinstance(v2["graph_hints"]["throughput_warmup"], bool)
+    assert v2["external_usage"]["process_cpu_percent"]["value"] is None
+    assert v2["external_usage"]["process_cpu_percent"]["status"] == "not_detected"
+    assert v2["aggregate_accelerator"]["metrics"]["memory_pressure_percent"]["value"] is None
+    assert v2["aggregate_accelerator"]["metrics"]["temperature_c"]["value"] is None
+    assert v2["aggregate_accelerator"]["metrics"]["power_watts"]["value"] is None
+    assert v2["local_performance_insights"]["samples_per_sec"]["value"] is None
+    assert v2["local_performance_insights"]["samples_per_sec"]["status"] == "not_detected"
 
 
 def test_infrastructure_endpoint_survives_partial_probe_failure(tmp_store, monkeypatch):
@@ -162,9 +187,82 @@ def test_infrastructure_endpoint_survives_partial_probe_failure(tmp_store, monke
     assert "forced cpu failure" in (payload["metrics"]["system_cpu"]["error"] or "")
 
 
+def test_infrastructure_endpoint_surfaces_non_zero_samples_per_sec(tmp_store):
+    run_id = "infra-samples-per-sec-run"
+    run_dir = _seed_run(tmp_store, run_id)
+    with open(run_dir / "metrics.jsonl", "a") as f:
+        f.write(json.dumps({"step": 3, "timestamp": 103.0, "samples_per_sec": 320.0}) + "\n")
+
+    app = create_app(tmp_store)
+    client = TestClient(app)
+    response = client.get(f"/api/runs/{run_id}/infrastructure")
+
+    assert response.status_code == 200
+    payload = response.json()
+    samples_metric = payload["telemetry_v2"]["local_performance_insights"]["samples_per_sec"]
+    assert samples_metric["status"] == "active"
+    assert samples_metric["value"] == 320.0
+
+
+def test_endpoints_survive_malformed_runtime_state(tmp_store):
+    run_id = "infra-malformed-runtime-state"
+    run_dir = _seed_run(tmp_store, run_id)
+    # Simulate a concurrent write window / corrupted runtime state payload.
+    (run_dir / "runtime_state.json").write_text("")
+
+    app = create_app(tmp_store)
+    client = TestClient(app)
+
+    infra_response = client.get(f"/api/runs/{run_id}/infrastructure")
+    assert infra_response.status_code == 200
+    infra_payload = infra_response.json()
+    assert infra_payload["run_id"] == run_id
+    assert "telemetry_v2" in infra_payload
+
+    run_response = client.get(f"/api/runs/{run_id}")
+    assert run_response.status_code == 200
+    run_payload = run_response.json()
+    assert run_payload["run_id"] == run_id
+    assert run_payload["status"] in {"running", "starting", "paused", "idle", "completed", "failed", "interrupted", "cancelled"}
+
+    overview_response = client.get(f"/api/runs/{run_id}/overview")
+    assert overview_response.status_code == 200
+    overview_payload = overview_response.json()
+    assert overview_payload["run_id"] == run_id
+    assert "health_state" in overview_payload
+
+
 def test_infrastructure_endpoint_returns_404_for_unknown_run(tmp_store):
     app = create_app(tmp_store)
     client = TestClient(app)
 
     response = client.get("/api/runs/missing-run/infrastructure")
     assert response.status_code == 404
+
+
+def test_legacy_framework_runs_remain_readable(tmp_store):
+    run_id = "legacy-run-readable"
+    _seed_legacy_run(tmp_store, run_id)
+    app = create_app(tmp_store)
+    client = TestClient(app)
+
+    list_response = client.get("/api/runs")
+    assert list_response.status_code == 200
+    listed_ids = {item.get("run_id") for item in list_response.json()}
+    assert run_id in listed_ids
+
+    run_response = client.get(f"/api/runs/{run_id}")
+    assert run_response.status_code == 200
+    run_payload = run_response.json()
+    assert run_payload["framework"] == "legacy_tree_model"
+
+    overview_response = client.get(f"/api/runs/{run_id}/overview")
+    assert overview_response.status_code == 200
+    overview = overview_response.json()
+    assert overview["framework"] == "legacy_tree_model"
+    assert overview["status"] == "completed"
+
+    architecture_response = client.get(f"/api/runs/{run_id}/architecture")
+    assert architecture_response.status_code == 200
+    arch = architecture_response.json()
+    assert arch["layers"][0]["id"] == "root"

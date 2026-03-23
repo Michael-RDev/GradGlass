@@ -28,6 +28,7 @@ SEMANTIC_STATUS_LABELS = {
 }
 
 _COUNTER_CACHE: dict[str, dict[str, float]] = {}
+_PROCESS_CPU_SAMPLE_CACHE: dict[int, dict[str, Any]] = {}
 
 
 def _metric(
@@ -118,6 +119,47 @@ def _safe_non_negative_float(raw: Any) -> Optional[float]:
     if value is None:
         return None
     return max(0.0, value)
+
+
+def _drop_process_cpu_cache(pid: Optional[int]) -> None:
+    if pid is None:
+        return
+    _PROCESS_CPU_SAMPLE_CACHE.pop(pid, None)
+
+
+def _sample_training_process_cpu_percent(
+    *,
+    pid: int,
+    process: Any,
+    process_start_time: Optional[float],
+) -> tuple[Optional[float], bool]:
+    cached = _PROCESS_CPU_SAMPLE_CACHE.get(pid)
+    if cached is not None:
+        cached_start = _safe_float(cached.get("start_time"))
+        if (
+            cached_start is not None
+            and process_start_time is not None
+            and abs(cached_start - process_start_time) > 2.0
+        ):
+            cached = None
+            _drop_process_cpu_cache(pid)
+
+    if cached is None:
+        cached = {"process": process, "primed": False, "start_time": process_start_time}
+        _PROCESS_CPU_SAMPLE_CACHE[pid] = cached
+
+    sampler = cached.get("process") or process
+    if not cached.get("primed"):
+        sampler.cpu_percent(interval=None)
+        cached["process"] = sampler
+        cached["primed"] = True
+        cached["start_time"] = process_start_time
+        return None, True
+
+    value = float(sampler.cpu_percent(interval=None))
+    cached["process"] = sampler
+    cached["start_time"] = process_start_time
+    return value, False
 
 
 def _file_mtime(path: Path) -> Optional[float]:
@@ -1390,22 +1432,33 @@ def _collect_training_process_metrics(
 
     try:
         proc = psutil.Process(pid)
-        if expected_start is not None:
+        try:
             create_time = _safe_float(proc.create_time())
-            if create_time is not None and abs(create_time - expected_start) > 2.0:
-                raise RuntimeError("PID reused by a different process")
+        except Exception:
+            create_time = None
+        if expected_start is not None and create_time is not None and abs(create_time - expected_start) > 2.0:
+            _drop_process_cpu_cache(pid)
+            raise RuntimeError("PID reused by a different process")
         alive = bool(proc.is_running()) and proc.status() != getattr(psutil, "STATUS_ZOMBIE", "zombie")
         if not alive:
+            _drop_process_cpu_cache(pid)
             raise RuntimeError("training process is not running")
-
-        proc_cpu = float(proc.cpu_percent(interval=None))
+        proc_cpu, cpu_warmup = _sample_training_process_cpu_percent(
+            pid=pid,
+            process=proc,
+            process_start_time=create_time,
+        )
         mem_info = proc.memory_info()
         rss_bytes = int(getattr(mem_info, "rss", 0))
         process_ram_percent = float(proc.memory_percent())
         host_cpu = _safe_float((host_cpu_metric or {}).get("value"))
         cpu_share = None
-        if host_cpu is not None and host_cpu > 0:
+        if host_cpu is not None and host_cpu > 0 and proc_cpu is not None:
             cpu_share = round(min(100.0, max(0.0, (proc_cpu / host_cpu) * 100.0)), 2)
+
+        cpu_details: dict[str, Any] = {"warmup": bool(cpu_warmup)}
+        if cpu_share is not None:
+            cpu_details["cpu_share_of_host_percent"] = cpu_share
 
         return {
             "pid": _semantic_metric(
@@ -1420,13 +1473,13 @@ def _collect_training_process_metrics(
             "process_cpu_percent": _semantic_metric(
                 key="process_cpu_percent",
                 name="Training process CPU",
-                value=round(proc_cpu, 2),
-                status="active",
+                value=round(proc_cpu, 2) if proc_cpu is not None else None,
+                status="active" if proc_cpu is not None else "not_detected",
                 source="psutil",
                 probe="psutil.Process.cpu_percent",
                 unit="%",
                 timestamp=collected_at,
-                details={"cpu_share_of_host_percent": cpu_share},
+                details=cpu_details,
             ),
             "process_ram_percent": _semantic_metric(
                 key="process_ram_percent",
@@ -1460,6 +1513,7 @@ def _collect_training_process_metrics(
             ),
         }
     except Exception as exc:
+        _drop_process_cpu_cache(pid)
         return {
             "pid": _semantic_metric(
                 key="pid",
@@ -1876,7 +1930,6 @@ def _build_telemetry_v2(
             metadata=metadata,
             metrics=metrics_rows,
             runtime_state=runtime_state,
-            sklearn_diagnostics=store.get_sklearn_diagnostics(run_id),
             now_ts=collected_at,
         )
     except Exception:

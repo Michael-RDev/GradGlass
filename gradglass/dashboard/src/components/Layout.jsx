@@ -3,10 +3,10 @@ import { Microscope, LayoutDashboard, Activity, BarChart2, Cpu, Database, GitCom
 import { useTheme } from './ThemeProvider';
 
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Dashboard' },
-  { path: '/experiments', label: 'Experiments' },
-  { path: '/models', label: 'Models' },
-  { path: '/datasets', label: 'Datasets' },
+  { label: 'Dashboard', runPath: '/overview', globalPath: '/dashboard' },
+  { label: 'Experiments', runPath: '/compare', globalPath: '/experiments' },
+  { label: 'Models', runPath: '/internals', globalPath: '/models' },
+  { label: 'Datasets', runPath: '/data', globalPath: '/datasets' },
 ];
 
 const SIDEBAR_SECTIONS = [
@@ -59,13 +59,28 @@ export default function Layout({ children }) {
             <span className="text-xl font-bold tracking-tight text-theme-text-primary hidden sm:block">GradGlass</span>
           </Link>
 
-          {/* Center: Main Nav (Placeholder Links) */}
+          {/* Center: Main Nav */}
           <nav className="hidden md:flex items-center gap-1">
-            {MAIN_NAV.map(nav => (
-               <button key={nav.path} className="px-4 py-2 rounded-lg text-sm font-medium text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-surface-hover transition-colors">
-                 {nav.label}
-               </button>
-            ))}
+            {MAIN_NAV.map((nav) => {
+              const target = runId ? `/run/${runId}${nav.runPath}` : nav.globalPath;
+              const isActive = runId
+                ? location.pathname.includes(nav.runPath)
+                : location.pathname === nav.globalPath;
+
+              return (
+                <Link
+                  key={nav.label}
+                  to={target}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'text-theme-primary bg-theme-primary/10'
+                      : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-surface-hover'
+                  }`}
+                >
+                  {nav.label}
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
