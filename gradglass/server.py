@@ -4,7 +4,6 @@ import json
 import socket
 import threading
 import time
-import webbrowser
 from pathlib import Path
 from typing import Any, Optional
 import numpy as np
@@ -15,7 +14,9 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from gradglass.artifacts import ArtifactStore
+from gradglass.browser import schedule_url_open_detached
 from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, architecture_diff
+from gradglass.evaluation import build_evaluation_payload
 from gradglass.experiment_tracking import build_overview_snapshot, normalize_run_status
 from gradglass.telemetry import collect_infrastructure_telemetry
 
@@ -366,86 +367,20 @@ def create_app(store):
 
     @app.get("/api/runs/{run_id}/eval")
     async def get_eval_metrics(run_id):
+        meta = store.get_run_metadata(run_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
         predictions = store.get_predictions(run_id)
-        if not predictions:
+        metrics = store.get_metrics(run_id)
+        if not predictions and not metrics:
             raise HTTPException(
-                status_code=404, detail="No evaluation data found. Log predictions using run.log_batch()."
+                status_code=404,
+                detail="No evaluation data found. Log predictions with run.log_batch() or metrics with run.log().",
             )
 
-        results = []
-        for pred in predictions:
-            step = pred.get("step")
-            y_true = np.array(pred.get("y_true", []))
-            y_pred = np.array(pred.get("y_pred", []))
-
-            if len(y_true) == 0 or len(y_pred) == 0:
-                continue
-
-            y_true_float = y_true.astype(float)
-            y_pred_float = y_pred.astype(float)
-            is_classification = np.all(np.mod(y_true_float, 1) == 0) and np.all(np.mod(y_pred_float, 1) == 0)
-
-            step_eval = {"step": step, "is_classification": bool(is_classification)}
-
-            if is_classification:
-                # Basic classification metrics
-                correct = np.sum(y_true == y_pred)
-                total = len(y_true)
-                step_eval["accuracy"] = float(correct / total) if total > 0 else 0.0
-                step_eval["support"] = total
-
-                # Confusion matrix
-                classes = np.unique(np.concatenate([y_true, y_pred]))
-                num_classes = len(classes)
-                class_to_idx = {c: i for i, c in enumerate(classes)}
-                cm = np.zeros((num_classes, num_classes), dtype=int)
-                for t, p in zip(y_true, y_pred):
-                    cm[class_to_idx[t], class_to_idx[p]] += 1
-
-                step_eval["confusion_matrix"] = {"classes": [int(c) for c in classes], "matrix": cm.tolist()}
-
-                # Per class precision/recall/f1
-                per_class = []
-                macro_f1, macro_p, macro_r = 0, 0, 0
-                for i, cls in enumerate(classes):
-                    tp = cm[i, i]
-                    fp = np.sum(cm[:, i]) - tp
-                    fn = np.sum(cm[i, :]) - tp
-
-                    p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-                    r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-                    f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0.0
-
-                    macro_p += p
-                    macro_r += r
-                    macro_f1 += f1
-
-                    per_class.append(
-                        {
-                            "class": int(cls),
-                            "precision": float(p),
-                            "recall": float(r),
-                            "f1": float(f1),
-                            "support": int(np.sum(cm[i, :])),
-                        }
-                    )
-
-                step_eval["per_class"] = per_class
-                if num_classes > 0:
-                    step_eval["macro_f1"] = float(macro_f1 / num_classes)
-                    step_eval["macro_precision"] = float(macro_p / num_classes)
-                    step_eval["macro_recall"] = float(macro_r / num_classes)
-            else:
-                error = y_true_float - y_pred_float
-                mse = np.mean(error**2)
-                mae = np.mean(np.abs(error))
-                step_eval["mse"] = float(mse)
-                step_eval["rmse"] = float(np.sqrt(mse))
-                step_eval["mae"] = float(mae)
-
-            results.append(step_eval)
-
-        return {"run_id": run_id, "evaluations": results}
+        report = build_evaluation_payload(run_id, metadata=meta, metrics=metrics, predictions=predictions)
+        return {"run_id": run_id, "evaluations": report["evaluations"], "report": report}
 
     @app.websocket("/api/runs/{run_id}/stream")
     async def stream_metrics(websocket, run_id):
@@ -579,11 +514,6 @@ def start_server(app, port=0):
 
 def start_server_blocking(app, port=8432, open_browser=True):
     if open_browser:
-
-        def open_fn():
-            time.sleep(1.5)
-            webbrowser.open(f"http://localhost:{port}")
-
-        threading.Thread(target=open_fn, daemon=True).start()
+        schedule_url_open_detached(f"http://localhost:{port}", delay_s=1.5)
     print(f"🔬 GradGlass server running at http://localhost:{port}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")

@@ -5,10 +5,10 @@ import socket
 import time
 import uuid
 import threading
-import webbrowser
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 import numpy as np
+from gradglass.browser import open_url_detached, resolve_open_browser_preference, schedule_url_open_detached
 from gradglass.experiment_tracking import infer_total_steps_from_config
 
 if TYPE_CHECKING:
@@ -17,11 +17,28 @@ if TYPE_CHECKING:
 _UNSET = object()
 
 
+def _coerce_bool_option(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return bool(value)
+
+
 class Run:
     def __init__(self, name, store, auto_open=False, **options):
         self.name = name
         self.store = store
-        self.options = options
+        self.options = dict(options)
+        self.options["enable_benchmarks"] = _coerce_bool_option(
+            self.options.get("enable_benchmarks"), default=False
+        )
         self.auto_open = auto_open
         self.run_id = f"{name}-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
         self.run_dir = self.store.ensure_run_dir(self.run_id)
@@ -110,6 +127,10 @@ class Run:
             run.framework = meta.get("framework")
             run.start_time = meta.get("start_time_epoch")
             run._git_commit = meta.get("git_commit")
+            run.options = dict(meta.get("config") or {})
+            run.options["enable_benchmarks"] = _coerce_bool_option(
+                run.options.get("enable_benchmarks"), default=False
+            )
         else:
             run.name = run_id
         return run
@@ -252,6 +273,7 @@ class Run:
         every=50,
         monitor=None,
         monitor_port=None,
+        monitor_open_browser: Optional[bool] = None,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -288,6 +310,12 @@ class Run:
         self.engine.extract_architecture()
         monitor_enabled = bool(self.options.get("monitor", False)) if monitor is None else bool(monitor)
         resolved_monitor_port = self.options.get("port", 0) if monitor_port is None else monitor_port
+        resolved_monitor_open_browser = resolve_open_browser_preference(
+            monitor_open_browser,
+            self.options.get("monitor_open_browser"),
+            env_var="GRADGLASS_OPEN_BROWSER",
+            default=True,
+        )
         self._write_runtime_state(
             event="watch_ready",
             monitor_enabled=monitor_enabled,
@@ -295,7 +323,7 @@ class Run:
             current_step=self.step,
         )
         if monitor_enabled:
-            self.monitor(port=resolved_monitor_port or 0, open_browser=True)
+            self.monitor(port=resolved_monitor_port or 0, open_browser=resolved_monitor_open_browser)
         return self
 
     def detectframework(self, model):
@@ -373,7 +401,7 @@ class Run:
             if self.server_port is not None:
                 # Server already running from monitor(), just open the browser
                 url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-                webbrowser.open(url)
+                open_url_detached(url)
             else:
                 self.open()
         return report
@@ -389,7 +417,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
             else:
                 self.open()
         return report
@@ -417,7 +445,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
             else:
                 self.open()
         return report
@@ -444,7 +472,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                webbrowser.open(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
             else:
                 self.open()
         return report
@@ -458,12 +486,7 @@ class Run:
         url = f"http://localhost:{port}/?run={self.run_id}"
         print(f"GradGlass dashboard: {url}")
         print("Press Ctrl+C to stop the server.")
-
-        def open_browser_fn():
-            time.sleep(1.5)
-            webbrowser.open(url)
-
-        threading.Thread(target=open_browser_fn, daemon=True).start()
+        schedule_url_open_detached(url, delay_s=1.5)
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
     def serve(self, port=0, open_browser=True):
@@ -475,7 +498,7 @@ class Run:
             self.server_port = actual_port
         if open_browser:
             url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-            webbrowser.open(url)
+            open_url_detached(url)
         return self.server_port
 
     def monitor(self, port=0, open_browser=True):
@@ -493,7 +516,7 @@ class Run:
             # Server already running
             if open_browser:
                 url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-                webbrowser.open(url)
+                open_url_detached(url)
             self._write_runtime_state(
                 event="monitor_reuse", monitor_enabled=True, monitor_port=self.server_port, current_step=self.step
             )
@@ -508,12 +531,7 @@ class Run:
         url = f"http://localhost:{actual_port}/?run={self.run_id}"
         print(f"\U0001f52c GradGlass live monitor: {url}")
         if open_browser:
-
-            def open_fn():
-                time.sleep(1.0)
-                webbrowser.open(url)
-
-            threading.Thread(target=open_fn, daemon=True).start()
+            open_url_detached(url)
         return actual_port
 
     def check_leakage(self, train_x, train_y, test_x, test_y, max_samples=2000, print_summary=True):

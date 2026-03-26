@@ -103,7 +103,7 @@ def main():
         phase2_epochs=PHASE2_EPOCHS,
         note="Two-phase: frozen backbone → full fine-tune",
     )
-    run.watch(model, gradients="summary", activations="auto", every=1, sample_batches=3)
+    run.watch(model, gradients="summary", activations="auto", every=1, sample_batches=3, monitor_open_browser=False)
 
     print(f"\nPhase 1: Training head only ({PHASE1_EPOCHS} epochs, backbone frozen)")
     freeze_backbone(model)

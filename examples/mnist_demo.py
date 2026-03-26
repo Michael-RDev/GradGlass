@@ -69,15 +69,23 @@ def train_epoch(model, loader, optimizer, run, epoch):
         optimizer.step()
         batch_loss = loss.item()
         preds = logits.argmax(dim=1)
+        top_5 = logits.topk(k=min(5, logits.size(1)), dim=1).indices
         batch_correct = (preds == y).sum().item()
         batch_total = y.size(0)
+        top_5_acc = (top_5 == y.unsqueeze(1)).any(dim=1).float().mean().item()
         elapsed_s = max(time.perf_counter() - batch_start, 1e-9)
         samples_per_sec = batch_total / elapsed_s
         total_loss += batch_loss * batch_total
         correct += batch_correct
         total += batch_total
-        run.log(loss=batch_loss, acc=batch_correct / batch_total, epoch=epoch, samples_per_sec=samples_per_sec)
-        run.log_batch(x=x, y=y, y_pred=logits, loss=loss)
+        run.log(
+            loss=batch_loss,
+            top_1_accuracy=batch_correct / batch_total,
+            top_5_accuracy=top_5_acc,
+            epoch=epoch,
+            samples_per_sec=samples_per_sec,
+        )
+        run.log_batch(x=x, y=y, y_pred=preds, loss=loss)
     return (total_loss / total, correct / total)
 
 
@@ -99,7 +107,7 @@ def main():
     (train_loader, test_loader) = get_loaders()
     model = MnistCNN().to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    run = gg.run("mnist-cnn", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE)
+    run = gg.run("mnist-cnn", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE, task="vision", enable_benchmarks=True)
     run.check_leakage_from_loaders(train_loader=train_loader, test_loader=test_loader)
     run.watch(model, optimizer, activations="auto", gradients="summary", every=1, sample_batches=3, monitor=True)
     print(f"\nModel: {sum((p.numel() for p in model.parameters())):,} parameters\n")

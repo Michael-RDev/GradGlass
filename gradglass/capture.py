@@ -459,20 +459,74 @@ class CaptureEngine:
                     return t.numpy()
                 return np.array(t)
 
+            def shape_list(t):
+                arr = to_np(t)
+                return list(arr.shape) if arr is not None else None
+
+            def is_integer_like(arr):
+                if arr is None:
+                    return False
+                try:
+                    float_arr = arr.astype(float)
+                except (TypeError, ValueError):
+                    return False
+                if np.any(~np.isfinite(float_arr)):
+                    return False
+                return bool(np.all(np.isclose(float_arr, np.round(float_arr))))
+
+            def infer_input_modality(x_np):
+                if x_np is None:
+                    return None
+                if x_np.ndim >= 4:
+                    return "vision"
+                if x_np.ndim == 3:
+                    return "sequence"
+                if x_np.ndim == 2:
+                    return "structured_data"
+                return "scalar_or_label"
+
+            def looks_like_class_scores(y_np, y_pred_np):
+                if y_np is None or y_pred_np is None or y_pred_np.ndim != 2:
+                    return False
+                if y_np.ndim > 1:
+                    return False
+                if y_pred_np.shape[0] != y_np.shape[0] or y_pred_np.shape[1] <= 1:
+                    return False
+                return is_integer_like(y_np)
+
+            def confidence_from_scores(scores):
+                scores = scores.astype(float)
+                if np.all(scores >= 0.0):
+                    row_sums = scores.sum(axis=1)
+                    if np.all(np.isclose(row_sums, 1.0, atol=1e-3)):
+                        return np.max(scores, axis=1)
+                shifted = scores - np.max(scores, axis=1, keepdims=True)
+                exps = np.exp(shifted)
+                probs = exps / np.sum(exps, axis=1, keepdims=True)
+                return np.max(probs, axis=1)
+
             y_np = to_np(y)
+            x_np = to_np(x)
             y_pred_np = to_np(y_pred)
             record = {"step": step, "timestamp": time.time()}
+            if shape_list(x) is not None:
+                record["input_shape"] = shape_list(x)
+                record["input_modality_hint"] = infer_input_modality(x_np)
             if y_np is not None:
+                record["target_shape"] = list(y_np.shape)
                 record["y_true"] = y_np[:256].tolist() if len(y_np) > 256 else y_np.tolist()
             if y_pred_np is not None:
-                if y_pred_np.ndim > 1:
+                record["prediction_shape"] = list(y_pred_np.shape)
+                if looks_like_class_scores(y_np, y_pred_np):
                     pred_classes = np.argmax(y_pred_np, axis=-1)
-                    confidence = np.max(y_pred_np, axis=-1)
+                    confidence = confidence_from_scores(y_pred_np)
                     record["y_pred"] = pred_classes[:256].tolist()
                     record["confidence"] = confidence[:256].tolist()
                     record["logits_sample"] = y_pred_np[:16].tolist()
+                    record["prediction_type"] = "class_scores"
                 else:
                     record["y_pred"] = y_pred_np[:256].tolist()
+                    record["prediction_type"] = "numeric_array" if y_pred_np.ndim > 1 else "numeric_vector"
             if loss is not None:
                 record["loss"] = float(loss) if np.isscalar(loss) else float(to_np(loss))
             filepath = pred_dir / f"probe_step_{step}.json"
@@ -544,7 +598,7 @@ try:
     import tensorflow as _tf_for_keras_cb
 
     _KerasCallbackBase = _tf_for_keras_cb.keras.callbacks.Callback
-except ImportError:
+except (ImportError, AttributeError):
     _KerasCallbackBase = object
 
 

@@ -107,6 +107,7 @@ def main():
     model = Regressor(in_features=12).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
+    # Regression runs keep benchmark suites off unless enable_benchmarks=True is set explicitly.
     run = gg.run("synthetic-regression", lr=LR, epochs=EPOCHS, batch_size=BATCH_SIZE, task="regression")
     run.watch(model, optimizer, activations="auto", gradients="summary", every=5, sample_batches=2, monitor=False)
 

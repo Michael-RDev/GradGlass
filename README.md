@@ -62,11 +62,25 @@ model.fit(train_x, train_y, validation_data=(val_x, val_y), epochs=5, callbacks=
 run.finish(open=True)
 ```
 
+## Benchmark Opt-In
+
+Benchmarks stay off by default. Opt in explicitly on compatible runs:
+
+```python
+run = gg.run(
+    "my-vision-run",
+    task="vision",
+    enable_benchmarks=True,
+)
+```
+
 ## Notes
 
 - Use `run.watch(model, optimizer)` for PyTorch and `run.keras_callback()` for Keras flows.
+- `enable_benchmarks` defaults to `False`; standard classification/regression runs do not expose benchmark suites unless you opt in explicitly.
 - `run.fit(...)` is intentionally disabled in this release.
 - Historical runs with other framework labels remain readable through the API/dashboard, but new execution paths are PT/TF only.
+- If automatic browser launch is unstable on your machine, pass `monitor_open_browser=False` to `run.watch(...)` or set `GRADGLASS_OPEN_BROWSER=0`.
 
 ## Included Examples
 
@@ -91,3 +105,4 @@ The dashboard is served from the local API and includes:
 - Infrastructure telemetry
 
 Start a dashboard while training with `monitor=True` in `run.watch(...)`, or open after training with `run.open()` / `run.finish(open=True)`.
+When browser auto-open is disabled, GradGlass still prints the dashboard URL so you can open it manually.

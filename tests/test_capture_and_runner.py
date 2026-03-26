@@ -445,6 +445,32 @@ class TestBatchPredictions:
         assert "y_true" in data
         assert "y_pred" in data
 
+    def test_classification_confidence_is_normalized(self, engine):
+        x = torch.randn(8, 4)
+        y = torch.randint(0, 2, (8,))
+        logits = engine.model(x)
+
+        engine.log_batch_predictions(step=7, x=x, y=y, y_pred=logits, loss=0.1)
+
+        data = json.loads((engine.run_dir / "predictions" / "probe_step_7.json").read_text())
+        assert data["prediction_type"] == "class_scores"
+        assert all(0.0 <= conf <= 1.0 for conf in data["confidence"])
+
+    def test_multistep_numeric_predictions_preserve_full_shape(self, engine):
+        x = torch.randn(4, 48, 5)
+        y = torch.randn(4, 12)
+        y_pred = torch.randn(4, 12)
+
+        engine.log_batch_predictions(step=8, x=x, y=y, y_pred=y_pred, loss=0.2)
+
+        data = json.loads((engine.run_dir / "predictions" / "probe_step_8.json").read_text())
+        assert data["prediction_type"] == "numeric_array"
+        assert data["prediction_shape"] == [4, 12]
+        assert data["input_shape"] == [4, 48, 5]
+        assert data["input_modality_hint"] == "sequence"
+        assert len(data["y_pred"]) == 4
+        assert len(data["y_pred"][0]) == 12
+
     def test_handles_none_y(self, engine):
         x = torch.randn(4, 4)
         logits = engine.model(x)
@@ -484,6 +510,18 @@ class TestRunInit:
         data = json.loads(meta_path.read_text())
         assert data["name"] == "meta-test"
         assert data["status"] == "running"
+
+    def test_enable_benchmarks_defaults_false_in_metadata(self, tmp_store):
+        run = Run(name="meta-bench-default", store=tmp_store)
+        meta_path = run.run_dir / "metadata.json"
+        data = json.loads(meta_path.read_text())
+        assert data["config"]["enable_benchmarks"] is False
+
+    def test_enable_benchmarks_persisted_when_provided(self, tmp_store):
+        run = Run(name="meta-bench-enabled", store=tmp_store, enable_benchmarks=True)
+        meta_path = run.run_dir / "metadata.json"
+        data = json.loads(meta_path.read_text())
+        assert data["config"]["enable_benchmarks"] is True
 
     def test_subdirs_created(self, tmp_store):
         run = Run(name="dir-test", store=tmp_store)

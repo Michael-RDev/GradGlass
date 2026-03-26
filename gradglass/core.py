@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Optional
+from gradglass.browser import open_url_detached
 from gradglass.run import Run
 from gradglass.artifacts import ArtifactStore
 
@@ -68,19 +69,13 @@ class GradGlass:
 
     def monitor(self, port=8432, open_browser=True):
         from gradglass.server import create_app, start_server
-        import webbrowser, threading, time
 
         app = create_app(self.store)
         actual_port = start_server(app, port=port)
         url = f"http://localhost:{actual_port}"
         print(f"\U0001f52c GradGlass dashboard: {url}")
         if open_browser:
-
-            def open_fn():
-                time.sleep(1.0)
-                webbrowser.open(url)
-
-            threading.Thread(target=open_fn, daemon=True).start()
+            open_url_detached(url)
         return actual_port
 
 
