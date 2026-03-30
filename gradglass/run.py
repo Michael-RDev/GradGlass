@@ -7,6 +7,7 @@ import uuid
 import threading
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
+from urllib.parse import quote
 import numpy as np
 from gradglass.browser import open_url_detached, resolve_open_browser_preference, schedule_url_open_detached
 from gradglass.experiment_tracking import infer_total_steps_from_config
@@ -54,6 +55,7 @@ class Run:
         self.start_time = time.time()
         self.server_process = None
         self.server_port = None
+        self._browser_opened = False
         self.grad_buffer = {}
         self.lock = threading.Lock()
         self._git_commit = self._capture_git_commit()
@@ -113,6 +115,7 @@ class Run:
         run.start_time = None
         run.server_process = None
         run.server_port = None
+        run._browser_opened = False
         run.grad_buffer = {}
         run.lock = threading.Lock()
         run._git_commit = None  # not needed for read-only access to existing runs
@@ -342,6 +345,21 @@ class Run:
 
         return None
 
+    def _dashboard_run_path(self) -> str:
+        encoded_run_id = quote(str(self.run_id), safe="")
+        return f"/run/{encoded_run_id}/overview"
+
+    def _dashboard_run_url(self, port: int) -> str:
+        return f"http://localhost:{port}{self._dashboard_run_path()}"
+
+    def _open_dashboard_browser(self, port: int, *, force: bool = False) -> bool:
+        if self._browser_opened and not force:
+            return False
+        opened = open_url_detached(self._dashboard_run_url(port))
+        if opened:
+            self._browser_opened = True
+        return opened
+
     def log(self, **metrics):
         self.step += 1
         entry = {"step": self.step, "timestamp": time.time(), **metrics}
@@ -400,8 +418,7 @@ class Run:
         if open:
             if self.server_port is not None:
                 # Server already running from monitor(), just open the browser
-                url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-                open_url_detached(url)
+                self._open_dashboard_browser(self.server_port)
             else:
                 self.open()
         return report
@@ -417,7 +434,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                self._open_dashboard_browser(self.server_port)
             else:
                 self.open()
         return report
@@ -445,7 +462,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                self._open_dashboard_browser(self.server_port)
             else:
                 self.open()
         return report
@@ -472,7 +489,7 @@ class Run:
             report = self.analyze(print_summary=print_summary)
         if open:
             if self.server_port is not None:
-                open_url_detached(f"http://localhost:{self.server_port}/?run={self.run_id}")
+                self._open_dashboard_browser(self.server_port)
             else:
                 self.open()
         return report
@@ -483,9 +500,10 @@ class Run:
 
         app = create_app(self.store)
         port = find_free_port()
-        url = f"http://localhost:{port}/?run={self.run_id}"
+        url = self._dashboard_run_url(port)
         print(f"GradGlass dashboard: {url}")
         print("Press Ctrl+C to stop the server.")
+        self._browser_opened = True
         schedule_url_open_detached(url, delay_s=1.5)
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
@@ -497,8 +515,7 @@ class Run:
             actual_port = start_server(app, port=port)
             self.server_port = actual_port
         if open_browser:
-            url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-            open_url_detached(url)
+            self._open_dashboard_browser(self.server_port)
         return self.server_port
 
     def monitor(self, port=0, open_browser=True):
@@ -515,8 +532,7 @@ class Run:
         if self.server_port is not None:
             # Server already running
             if open_browser:
-                url = f"http://localhost:{self.server_port}/?run={self.run_id}"
-                open_url_detached(url)
+                self._open_dashboard_browser(self.server_port)
             self._write_runtime_state(
                 event="monitor_reuse", monitor_enabled=True, monitor_port=self.server_port, current_step=self.step
             )
@@ -528,10 +544,10 @@ class Run:
         self._write_runtime_state(
             event="monitor_start", monitor_enabled=True, monitor_port=actual_port, current_step=self.step
         )
-        url = f"http://localhost:{actual_port}/?run={self.run_id}"
+        url = self._dashboard_run_url(actual_port)
         print(f"\U0001f52c GradGlass live monitor: {url}")
         if open_browser:
-            open_url_detached(url)
+            self._open_dashboard_browser(actual_port)
         return actual_port
 
     def check_leakage(self, train_x, train_y, test_x, test_y, max_samples=2000, print_summary=True):

@@ -24,10 +24,10 @@ STATUS_ORDER = {"fail": 0, "warn": 1, "info": 2}
 CTA_PATHS = {
     "Training Metrics": "/training",
     "Predictions": "/evaluation",
-    "Checkpoint Diff": "/internals",
-    "Gradient Flow": "/internals",
-    "Model Structure": "/internals",
-    "Activations": "/internals",
+    "Checkpoint Diff": "/overview",
+    "Gradient Flow": "/overview",
+    "Model Structure": "/overview",
+    "Activations": "/overview",
     "Data": "/data",
     "Distributed Training": "/infrastructure",
     "Runtime Health": "/infrastructure",
@@ -325,7 +325,7 @@ def _grouped_gradient_flag_alerts(ctx: TestContext) -> list[dict[str, Any]]:
                 details={"flag": flag, "layers": layer_names, "step": latest_step},
                 evidence=evidence,
                 step=latest_step,
-                cta_path="/internals",
+                cta_path="/overview",
             )
         )
     return alerts

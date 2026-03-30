@@ -175,4 +175,89 @@ def test_monitor_uses_detached_browser_launcher(tmp_store, monkeypatch):
     port = run.monitor(port=8123, open_browser=True)
 
     assert port == 8123
-    assert called["url"] == f"http://localhost:{port}/?run={run.run_id}"
+    assert called["url"] == f"http://localhost:{port}/run/{run.run_id}/overview"
+
+
+def test_dashboard_run_path_encodes_run_id(tmp_store, monkeypatch):
+    _patch_write_metadata(monkeypatch)
+    run = Run(name="encoded-path", store=tmp_store)
+    run.run_id = "demo run/1"
+
+    assert run._dashboard_run_path() == "/run/demo%20run%2F1/overview"
+
+
+def test_finish_open_reuses_overview_deep_link(tmp_store, monkeypatch):
+    _patch_write_metadata(monkeypatch)
+    called = {}
+
+    def fake_open(url):
+        called["url"] = url
+        return True
+
+    monkeypatch.setattr(run_module, "open_url_detached", fake_open)
+
+    run = Run(name="finish-open", store=tmp_store)
+    run.server_port = 8456
+    run.finish(open=True, analyze=False)
+
+    assert called["url"] == f"http://localhost:8456/run/{run.run_id}/overview"
+
+
+def test_finish_open_skips_duplicate_browser_launch_if_monitor_already_opened(tmp_store, monkeypatch):
+    _install_fake_server(monkeypatch, port=8123)
+    _patch_write_metadata(monkeypatch)
+    calls = []
+
+    def fake_open(url):
+        calls.append(url)
+        return True
+
+    monkeypatch.setattr(run_module, "open_url_detached", fake_open)
+
+    run = Run(name="finish-open-once", store=tmp_store)
+    run.monitor(port=8123, open_browser=True)
+    run.finish(open=True, analyze=False)
+
+    assert calls == [f"http://localhost:8123/run/{run.run_id}/overview"]
+
+
+def test_finish_open_still_launches_if_monitor_did_not_open_browser(tmp_store, monkeypatch):
+    _patch_write_metadata(monkeypatch)
+    calls = []
+
+    def fake_open(url):
+        calls.append(url)
+        return True
+
+    monkeypatch.setattr(run_module, "open_url_detached", fake_open)
+
+    run = Run(name="finish-open-late", store=tmp_store)
+    run.server_port = 8456
+    run.finish(open=True, analyze=False)
+
+    assert calls == [f"http://localhost:8456/run/{run.run_id}/overview"]
+
+
+def test_app_mounts_visualizations_on_overview_and_redirects_internals():
+    app_path = Path(__file__).parent.parent / "gradglass" / "dashboard" / "src" / "App.jsx"
+    app_source = app_path.read_text()
+
+    assert '<Route path="/run/:runId/overview" element={<ModelInternals />} />' in app_source
+    assert '<Route path="/run/:runId/internals" element={<RunInternalsRedirect />} />' in app_source
+
+
+def test_alerts_use_overview_as_canonical_visualization_cta():
+    alerts_py = (Path(__file__).parent.parent / "gradglass" / "alerts.py").read_text()
+    alerts_jsx = (Path(__file__).parent.parent / "gradglass" / "dashboard" / "src" / "pages" / "Alerts.jsx").read_text()
+
+    assert '"Checkpoint Diff": "/overview"' in alerts_py
+    assert '"Gradient Flow": "/overview"' in alerts_py
+    assert "'/overview': 'Open Overview'" in alerts_jsx
+
+
+def test_transfer_learning_demo_opens_final_overview_page():
+    demo_path = Path(__file__).parent.parent / "examples" / "transfer_learning_demo.py"
+    demo_source = demo_path.read_text()
+
+    assert "run.finish(open=True, analyze=True, print_summary=True)" in demo_source
+    assert "run.analyze(print_summary=True)" not in demo_source

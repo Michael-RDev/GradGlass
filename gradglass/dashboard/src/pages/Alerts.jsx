@@ -66,7 +66,7 @@ const CTA_LABELS = {
   '/training': 'Open Metrics',
   '/evaluation': 'Open Evaluation',
   '/infrastructure': 'Open Infrastructure',
-  '/internals': 'Open Visualizations',
+  '/overview': 'Open Overview',
   '/data': 'Open Data',
 };
 

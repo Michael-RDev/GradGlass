@@ -124,10 +124,7 @@ def main():
         print(f"  [Phase 2] epoch {epoch - PHASE1_EPOCHS}/{PHASE2_EPOCHS}")
 
     run.checkpoint(tag="phase2_end")
-    run.finish()
-
-    print("\nRunning analysis…")
-    run.analyze(print_summary=True)
+    run.finish(open=True, analyze=True, print_summary=True)
     print("\nDone! Check TRAINABLE_FROZEN_CONSISTENCY and FREEZE_RECOMMENDATION in the dashboard.")
 
 
