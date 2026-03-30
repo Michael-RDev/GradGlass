@@ -1,6 +1,7 @@
 """
 Pytest tests for gradglass.analysis.leakage using NumPy-only fixtures.
 """
+
 from __future__ import annotations
 
 import numpy as np

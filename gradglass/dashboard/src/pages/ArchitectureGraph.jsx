@@ -453,7 +453,7 @@ function inferEdgeLabel(src, dst) {
 // ─────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────
-export default function ArchitectureGraph() {
+export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClass = "h-[calc(100vh-100px)]" }) {
   const { runId } = useParams()
   const [architecture, setArchitecture] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -494,11 +494,20 @@ export default function ArchitectureGraph() {
   )
 
   const onNodeClick = useCallback((_, node) => {
-    if (node.type === 'leaf') setSelectedNode(layerMap[node.id] || null)
-    else setSelectedNode(null)
-  }, [layerMap])
+    if (node.type === 'leaf') {
+      const selected = layerMap[node.id] || null;
+      setSelectedNode(selected);
+      if (onNodeSelect) onNodeSelect(selected);
+    } else {
+      setSelectedNode(null);
+      if (onNodeSelect) onNodeSelect(null);
+    }
+  }, [layerMap, onNodeSelect])
 
-  const onPaneClick = useCallback(() => setSelectedNode(null), [])
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+    if (onNodeSelect) onNodeSelect(null);
+  }, [onNodeSelect])
 
   if (loading) return <LoadingSpinner />
   if (error) return <ErrorMessage message={error} />
@@ -513,9 +522,10 @@ export default function ArchitectureGraph() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)]">
+    <div className={`flex flex-col ${heightClass}`}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 shrink-0">
+      {!hideHeader && (
+        <div className="flex items-center justify-between mb-4 shrink-0">
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
             Architecture Graph
@@ -546,6 +556,7 @@ export default function ArchitectureGraph() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Legend */}
       <div className="flex items-center gap-4 mb-3 shrink-0">

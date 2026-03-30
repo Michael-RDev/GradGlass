@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from gradglass.alerts import build_alert_snapshot
 from gradglass.artifacts import ArtifactStore
 from gradglass.browser import schedule_url_open_detached
 from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, architecture_diff
@@ -105,58 +106,26 @@ def create_app(store):
 
     @app.get("/api/runs/{run_id}/alerts")
     async def get_alerts(run_id):
+        meta = store.get_run_metadata(run_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+
         metrics = store.get_metrics(run_id)
-        alerts = []
-        if metrics:
-            for m in metrics:
-                if "loss" in m:
-                    val = m["loss"]
-                    inf_nan = False
-                    if val is None:
-                        inf_nan = True
-                    elif isinstance(val, float) and (val != val or val == float("inf") or val == float("-inf")):
-                        inf_nan = True
-                    if inf_nan:
-                        alerts.append(
-                            {
-                                "severity": "high",
-                                "title": "NaN or Inf Loss",
-                                "message": f"Loss became NaN/Inf at step {m.get('step')}",
-                            }
-                        )
-                        break
-
-            if len(metrics) > 5:
-                # Simple overfitting check
-                recent = metrics[-5:]
-                train_losses = [m["loss"] for m in recent if "loss" in m and m["loss"] is not None]
-                val_losses = [m.get("val_loss") for m in recent if m.get("val_loss") is not None]
-                if len(train_losses) == 5 and len(val_losses) == 5:
-                    if train_losses[0] > train_losses[-1] and val_losses[0] < val_losses[-1]:
-                        alerts.append(
-                            {
-                                "severity": "medium",
-                                "title": "Possible Overfitting",
-                                "message": "Validation loss is increasing while training loss is decreasing.",
-                            }
-                        )
-
-        summaries = store.get_gradient_summaries(run_id)
-        if summaries:
-            last_summary = summaries[-1]
-            step = last_summary.get("step")
-            for layer, data in last_summary.get("layers", {}).items():
-                if data.get("norm", 0) > 10.0:
-                    alerts.append(
-                        {
-                            "severity": "warning",
-                            "title": "Large Gradients",
-                            "message": f"Potentially exploding gradient (norm {data.get('norm'):.2f}) at step {step} in {layer}",
-                        }
-                    )
-                    break
-
-        return {"run_id": run_id, "alerts": alerts}
+        runtime_state = store.get_runtime_state(run_id)
+        overview = build_overview_snapshot(
+            run_id=run_id,
+            metadata=meta,
+            metrics=metrics,
+            runtime_state=runtime_state,
+        )
+        return build_alert_snapshot(
+            store,
+            run_id,
+            metadata=meta,
+            metrics=metrics,
+            runtime_state=runtime_state,
+            overview=overview,
+        )
 
     @app.get("/api/runs/{run_id}/checkpoints")
     async def list_checkpoints(run_id):
@@ -396,6 +365,17 @@ def create_app(store):
                 try:
                     overview = get_overview_snapshot(store, run_id, metrics=metrics)
                     await websocket.send_json({"type": "overview_update", "data": overview})
+                    meta = store.get_run_metadata(run_id)
+                    if meta is not None:
+                        alerts = build_alert_snapshot(
+                            store,
+                            run_id,
+                            metadata=meta,
+                            metrics=metrics,
+                            runtime_state=store.get_runtime_state(run_id),
+                            overview=overview,
+                        )
+                        await websocket.send_json({"type": "alerts_update", "data": alerts})
                 except HTTPException:
                     await websocket.send_json(
                         {
@@ -407,6 +387,32 @@ def create_app(store):
                                 "total_steps_source": "unknown",
                                 "eta_s": None,
                                 "eta_reason": "Run not found",
+                            },
+                        }
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "alerts_update",
+                            "data": {
+                                "run_id": run_id,
+                                "status": "failed",
+                                "health_state": "FAILED",
+                                "summary": {
+                                    "total": 0,
+                                    "critical": 0,
+                                    "high": 0,
+                                    "medium": 0,
+                                    "low": 0,
+                                    "high_severity": 0,
+                                    "warnings": 0,
+                                    "fail_count": 0,
+                                    "warn_count": 0,
+                                    "health_state": "FAILED",
+                                    "health_reason": "Run not found",
+                                    "updated_at": time.time(),
+                                    "top_alert_id": None,
+                                },
+                                "alerts": [],
                             },
                         }
                     )

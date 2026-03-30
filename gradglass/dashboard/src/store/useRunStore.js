@@ -7,6 +7,7 @@ const useRunStore = create((set, get) => ({
   metadata: null,
   metrics: [],
   alerts: [],
+  alertsSummary: null,
   overview: null,
   ws: null,
 
@@ -16,7 +17,7 @@ const useRunStore = create((set, get) => ({
       ws.close();
     }
     
-    set({ activeRunId: runId, metadata: null, metrics: [], alerts: [], overview: null, ws: null });
+    set({ activeRunId: runId, metadata: null, metrics: [], alerts: [], alertsSummary: null, overview: null, ws: null });
 
     try {
       const [metaData, metricsData, alertsData, overviewData] = await Promise.all([
@@ -30,6 +31,7 @@ const useRunStore = create((set, get) => ({
         metadata: metaData,
         metrics: metricsData?.metrics || [],
         alerts: alertsData?.alerts || [],
+        alertsSummary: alertsData?.summary || null,
         overview: overviewData || null
       });
 
@@ -40,6 +42,11 @@ const useRunStore = create((set, get) => ({
           }));
         } else if (message.type === 'overview_update') {
           set({ overview: message.data || null });
+        } else if (message.type === 'alerts_update') {
+          set({
+            alerts: message.data?.alerts || [],
+            alertsSummary: message.data?.summary || null,
+          });
         }
       });
 

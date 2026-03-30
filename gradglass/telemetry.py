@@ -128,19 +128,12 @@ def _drop_process_cpu_cache(pid: Optional[int]) -> None:
 
 
 def _sample_training_process_cpu_percent(
-    *,
-    pid: int,
-    process: Any,
-    process_start_time: Optional[float],
+    *, pid: int, process: Any, process_start_time: Optional[float]
 ) -> tuple[Optional[float], bool]:
     cached = _PROCESS_CPU_SAMPLE_CACHE.get(pid)
     if cached is not None:
         cached_start = _safe_float(cached.get("start_time"))
-        if (
-            cached_start is not None
-            and process_start_time is not None
-            and abs(cached_start - process_start_time) > 2.0
-        ):
+        if cached_start is not None and process_start_time is not None and abs(cached_start - process_start_time) > 2.0:
             cached = None
             _drop_process_cpu_cache(pid)
 
@@ -605,7 +598,9 @@ def _detect_mps_active() -> tuple[bool, Optional[str]]:
         backend = getattr(getattr(torch, "backends", None), "mps", None)
         if backend is None:
             return False, None
-        if bool(getattr(backend, "is_available", lambda: False)()) and bool(getattr(backend, "is_built", lambda: True)()):
+        if bool(getattr(backend, "is_available", lambda: False)()) and bool(
+            getattr(backend, "is_built", lambda: True)()
+        ):
             return True, None
         return False, None
     except Exception as exc:
@@ -656,9 +651,7 @@ def _collect_cuda_accelerators(collected_at: float) -> tuple[list[dict[str, Any]
             mem_info, mem_err = _safe_nvml_call(nvml.nvmlDeviceGetMemoryInfo, handle)
             power, power_err = _safe_nvml_call(nvml.nvmlDeviceGetPowerUsage, handle)
             temp, temp_err = _safe_nvml_call(
-                nvml.nvmlDeviceGetTemperature,
-                handle,
-                getattr(nvml, "NVML_TEMPERATURE_GPU", 0),
+                nvml.nvmlDeviceGetTemperature, handle, getattr(nvml, "NVML_TEMPERATURE_GPU", 0)
             )
             fan, fan_err = _safe_nvml_call(nvml.nvmlDeviceGetFanSpeed, handle)
 
@@ -1045,7 +1038,9 @@ def _aggregate_accelerator_metrics(accelerators: list[dict[str, Any]], collected
     }
 
 
-def _get_counter_rate(cache_key: str, values: dict[str, float], now_ts: float) -> tuple[dict[str, Optional[float]], bool]:
+def _get_counter_rate(
+    cache_key: str, values: dict[str, float], now_ts: float
+) -> tuple[dict[str, Optional[float]], bool]:
     previous = _COUNTER_CACHE.get(cache_key)
     _COUNTER_CACHE[cache_key] = {**values, "ts": now_ts}
     if not previous:
@@ -1277,9 +1272,7 @@ def _collect_host_metrics(run_id: str, collected_at: float) -> dict[str, dict[st
             name="Network RX throughput",
             value=net_rx,
             status=(
-                "active"
-                if net_rx is not None
-                else ("not_supported" if net_probe_error is not None else "not_detected")
+                "active" if net_rx is not None else ("not_supported" if net_probe_error is not None else "not_detected")
             ),
             source="local_host",
             probe="psutil.net_io_counters",
@@ -1294,9 +1287,7 @@ def _collect_host_metrics(run_id: str, collected_at: float) -> dict[str, dict[st
             name="Network TX throughput",
             value=net_tx,
             status=(
-                "active"
-                if net_tx is not None
-                else ("not_supported" if net_probe_error is not None else "not_detected")
+                "active" if net_tx is not None else ("not_supported" if net_probe_error is not None else "not_detected")
             ),
             source="local_host",
             probe="psutil.net_io_counters",
@@ -1310,9 +1301,7 @@ def _collect_host_metrics(run_id: str, collected_at: float) -> dict[str, dict[st
 
 
 def _collect_training_process_metrics(
-    runtime_state: dict[str, Any],
-    collected_at: float,
-    host_cpu_metric: Optional[dict[str, Any]] = None,
+    runtime_state: dict[str, Any], collected_at: float, host_cpu_metric: Optional[dict[str, Any]] = None
 ) -> dict[str, dict[str, Any]]:
     pid = _safe_positive_int(runtime_state.get("training_pid"))
     expected_start = _safe_float(runtime_state.get("training_process_start_time"))
@@ -1444,9 +1433,7 @@ def _collect_training_process_metrics(
             _drop_process_cpu_cache(pid)
             raise RuntimeError("training process is not running")
         proc_cpu, cpu_warmup = _sample_training_process_cpu_percent(
-            pid=pid,
-            process=proc,
-            process_start_time=create_time,
+            pid=pid, process=proc, process_start_time=create_time
         )
         mem_info = proc.memory_info()
         rss_bytes = int(getattr(mem_info, "rss", 0))
@@ -1591,12 +1578,10 @@ def _build_local_performance_insights(
 ) -> dict[str, dict[str, Any]]:
     samples_per_sec = _latest_numeric_metric(metrics_rows, ["samples_per_sec", "tokens_per_sec", "throughput"])
     dataloader_wait_s = _latest_numeric_metric(
-        metrics_rows,
-        ["dataloader_wait_time_s", "dataloader_wait_s", "data_wait_s", "data_time"],
+        metrics_rows, ["dataloader_wait_time_s", "dataloader_wait_s", "data_wait_s", "data_time"]
     )
     h2d_transfer_s = _latest_numeric_metric(
-        metrics_rows,
-        ["host_to_device_transfer_time_s", "host_to_device_time_s", "h2d_time_s", "transfer_time_s"],
+        metrics_rows, ["host_to_device_transfer_time_s", "host_to_device_time_s", "h2d_time_s", "transfer_time_s"]
     )
 
     host_cpu = _safe_float(host_metrics.get("system_cpu_percent", {}).get("value"))
@@ -1629,8 +1614,15 @@ def _build_local_performance_insights(
         accelerator_starvation = round(starvation, 2)
 
     scaling_readiness = None
-    if any(v is not None for v in (cpu_bottleneck_score, memory_pressure_score, disk_pressure_score, accelerator_starvation)):
-        penalties = [v for v in (cpu_bottleneck_score, memory_pressure_score, disk_pressure_score, accelerator_starvation) if v is not None]
+    if any(
+        v is not None
+        for v in (cpu_bottleneck_score, memory_pressure_score, disk_pressure_score, accelerator_starvation)
+    ):
+        penalties = [
+            v
+            for v in (cpu_bottleneck_score, memory_pressure_score, disk_pressure_score, accelerator_starvation)
+            if v is not None
+        ]
         scaling_readiness = round(max(0.0, 100.0 - (sum(penalties) / float(len(penalties)))), 2)
 
     return {
@@ -1793,8 +1785,7 @@ def _build_cluster_metrics(
 
 
 def _build_external_usage(
-    host_metrics: dict[str, dict[str, Any]],
-    process_metrics: dict[str, dict[str, Any]],
+    host_metrics: dict[str, dict[str, Any]], process_metrics: dict[str, dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
     return {
         "host_cpu_percent": host_metrics.get(
@@ -1926,11 +1917,7 @@ def _build_telemetry_v2(
 
     try:
         overview = build_overview_snapshot(
-            run_id=run_id,
-            metadata=metadata,
-            metrics=metrics_rows,
-            runtime_state=runtime_state,
-            now_ts=collected_at,
+            run_id=run_id, metadata=metadata, metrics=metrics_rows, runtime_state=runtime_state, now_ts=collected_at
         )
     except Exception:
         overview = {
@@ -1943,9 +1930,7 @@ def _build_telemetry_v2(
 
     host_metrics = _collect_host_metrics(run_id, collected_at)
     process_metrics = _collect_training_process_metrics(
-        runtime_state,
-        collected_at,
-        host_cpu_metric=host_metrics.get("system_cpu_percent"),
+        runtime_state, collected_at, host_cpu_metric=host_metrics.get("system_cpu_percent")
     )
 
     accelerators_cuda, cuda_diag = _collect_cuda_accelerators(collected_at)
@@ -2093,12 +2078,7 @@ def collect_infrastructure_telemetry(store: ArtifactStore, run_id: str) -> dict[
 
     mode = "distributed" if distributed_verified else "standalone"
     telemetry_v2 = _build_telemetry_v2(
-        store=store,
-        run_id=run_id,
-        collected_at=collected_at,
-        mode=mode,
-        metrics_legacy=metrics,
-        live_guard=live_guard,
+        store=store, run_id=run_id, collected_at=collected_at, mode=mode, metrics_legacy=metrics, live_guard=live_guard
     )
 
     return {
