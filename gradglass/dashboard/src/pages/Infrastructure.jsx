@@ -310,7 +310,7 @@ function computeInsights(localInsights, diagnostics, runState) {
 function MetricBadge({ metric }) {
   const status = metric?.status || 'error';
   const label = metric?.status_label || 'Unknown';
-  return <span className={`badge ${metricStatusClass(status)}`}>{label}</span>;
+  return <span className={`badge px-2.5 py-0.5 shadow-sm transition-transform hover:scale-105 ${metricStatusClass(status)}`}>{label}</span>;
 }
 
 function buildSparklineOption({ labels, values, lineColor, areaColor, gridColor }) {
@@ -429,14 +429,16 @@ function CoreHealthCard({ title, icon: Icon, metric, labels, values, lineColor, 
   );
 
   return (
-    <div className="card">
-      <div className="flex items-center justify-between opacity-90">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</p>
-        <Icon className="h-4 w-4 text-theme-accent" />
+    <div className="card group">
+      <div className="flex items-center justify-between opacity-90 transition-opacity duration-300 group-hover:opacity-100">
+        <p className="text-sm font-semibold uppercase tracking-wide text-theme-text-secondary transition-colors group-hover:text-theme-primary">{title}</p>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-theme-primary/10 text-theme-primary transition-transform duration-300 group-hover:scale-110">
+          <Icon className="h-4 w-4" />
+        </div>
       </div>
 
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <p className="text-2xl font-bold text-slate-900 dark:text-white">{displayValue}</p>
+      <div className="mt-4 flex items-end justify-between gap-3">
+        <p className="text-3xl font-extrabold tracking-tight text-theme-text-primary">{displayValue}</p>
         <MetricBadge metric={metric} />
       </div>
 
@@ -462,7 +464,7 @@ function CoreHealthCard({ title, icon: Icon, metric, labels, values, lineColor, 
 function SeverityBadge({ severity }) {
   const normalized = severity || 'info';
   return (
-    <span className={`badge ${SEVERITY_STYLES[normalized] || SEVERITY_STYLES.info}`}>
+    <span className={`badge px-2.5 py-0.5 font-bold tracking-wider shadow-sm transition-transform hover:scale-105 ${SEVERITY_STYLES[normalized] || SEVERITY_STYLES.info}`}>
       {normalized.toUpperCase()}
     </span>
   );
@@ -1040,14 +1042,17 @@ export default function Infrastructure() {
       <div className="card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="h2 text-theme-text-primary">Infrastructure Telemetry</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">Infrastructure Telemetry</h1>
+            <p className="mt-3 max-w-2xl text-base leading-relaxed text-theme-text-secondary">
               Row-based run health, performance, scaling, hardware, and diagnosis dashboard.
             </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Run <span className="font-mono">{runId}</span> · Last update {formatTimestamp(telemetry?.collected_at)} · Source{' '}
-              <span className="font-mono">{v2?.source?.hostname || 'local-host'}</span>
-            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-medium text-theme-text-muted">
+              <span>Run <span className="font-mono bg-theme-bg/50 px-1 py-0.5 rounded">{runId}</span></span>
+              <span>·</span>
+              <span>Last update <span className="font-mono">{formatTimestamp(telemetry?.collected_at)}</span></span>
+              <span>·</span>
+              <span>Source <span className="font-mono bg-theme-bg/50 px-1 py-0.5 rounded">{v2?.source?.hostname || 'local-host'}</span></span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

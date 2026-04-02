@@ -42,10 +42,10 @@ const PANEL_LABELS = {
 };
 
 const STATUS_STYLES = {
-  passed: 'border-emerald-300 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400',
-  warning: 'border-amber-300 dark:border-amber-500/30 text-amber-600 dark:text-amber-400',
-  failed: 'border-red-300 dark:border-red-500/30 text-red-600 dark:text-red-400',
-  unknown: 'border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400',
+  passed: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400',
+  warning: 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400',
+  failed: 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400',
+  unknown: 'bg-slate-500/10 border-slate-500/30 text-slate-700 dark:text-slate-400',
 };
 
 function formatValue(value, fallback = '-') {
@@ -56,21 +56,21 @@ function formatValue(value, fallback = '-') {
 
 function MetricPill({ label, value }) {
   return (
-    <div className="rounded-xl border border-theme-border bg-theme-bg/50 px-3 py-2">
-      <p className="text-[11px] uppercase tracking-[0.18em] text-theme-text-muted">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-theme-text-primary">{value}</p>
+    <div className="rounded-xl border border-theme-border bg-theme-bg/50 px-4 py-2 hover:bg-theme-bg/80 transition-colors shadow-sm">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-theme-text-muted font-medium">{label}</p>
+      <p className="mt-1 text-base font-bold text-theme-text-primary">{value}</p>
     </div>
   );
 }
 
 function SelectField({ label, value, onChange, options }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-[0.18em] text-theme-text-muted">{label}</span>
+    <label className="flex flex-col gap-1.5 focus-within:text-theme-primary transition-colors">
+      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-theme-text-muted transition-colors group-focus-within:text-theme-primary">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-xl border border-theme-border bg-theme-surface px-3 py-2 text-sm text-theme-text-primary outline-none focus:border-theme-primary"
+        className="rounded-xl border border-theme-border bg-theme-surface px-4 py-2 text-sm font-medium text-theme-text-primary outline-none shadow-sm transition-all focus:border-theme-primary focus:ring-2 focus:ring-theme-primary/20 hover:border-theme-primary/50"
       >
         {options.map((option) => (
           <option key={option} value={option}>
@@ -87,13 +87,13 @@ function StageGrid({ stageCards, snapshots }) {
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {stageCards.map((card) => (
-          <div key={card.stage} className="rounded-2xl border border-theme-border bg-theme-surface p-5 shadow-sm">
+          <div key={card.stage} className="rounded-2xl border border-theme-border/50 bg-theme-surface/70 backdrop-blur-md p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-theme-primary/40">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-theme-text-primary">{card.title}</p>
-                <p className="mt-1 text-xs text-theme-text-muted">{card.splits.length ? card.splits.join(', ') : 'No recorded splits'}</p>
+                <p className="text-base font-bold text-theme-text-primary">{card.title}</p>
+                <p className="mt-1 text-sm font-medium text-theme-text-muted">{card.splits.length ? card.splits.join(', ') : 'No recorded splits'}</p>
               </div>
-              <span className={`badge ${STATUS_STYLES[card.status] || STATUS_STYLES.unknown}`}>
+              <span className={`badge shadow-sm px-2.5 py-0.5 ${STATUS_STYLES[card.status] || STATUS_STYLES.unknown}`}>
                 {card.status}
               </span>
             </div>
@@ -386,19 +386,21 @@ function RecommendationsSection({ recommendations }) {
 
 function PanelShell({ id, title, icon: Icon, collapsed, onToggle, children }) {
   return (
-    <section className="rounded-[28px] border border-theme-border bg-theme-surface p-6 shadow-sm">
-      <button className="flex w-full items-center justify-between gap-4 text-left" onClick={onToggle}>
-        <div className="flex items-center gap-3">
-          <div className="rounded-2xl bg-theme-primary/10 p-2 text-theme-primary">
-            <Icon className="h-5 w-5" />
+    <section className="rounded-[32px] border border-theme-border/50 bg-theme-surface/60 backdrop-blur-xl p-8 shadow-md hover:shadow-xl hover:border-theme-primary/30 transition-all duration-500">
+      <button className="group flex w-full items-center justify-between gap-4 text-left outline-none" onClick={onToggle}>
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-theme-primary/10 text-theme-primary transition-transform group-hover:scale-105">
+            <Icon className="h-6 w-6" />
           </div>
           <div>
-            <h2 className="h3 text-theme-text-primary">{title}</h2>
+            <h2 className="text-xl font-bold text-theme-text-primary transition-colors group-hover:text-theme-primary">{title}</h2>
           </div>
         </div>
-        {collapsed ? <ChevronRight className="h-5 w-5 text-theme-text-muted" /> : <ChevronDown className="h-5 w-5 text-theme-text-muted" />}
+        <div className="flex items-center justify-center h-8 w-8 rounded-full bg-theme-bg/50 transition-colors group-hover:bg-theme-primary/10">
+          {collapsed ? <ChevronRight className="h-5 w-5 text-theme-text-muted group-hover:text-theme-primary" /> : <ChevronDown className="h-5 w-5 text-theme-text-muted group-hover:text-theme-primary" />}
+        </div>
       </button>
-      {!collapsed && <div className="mt-6">{children}</div>}
+      {!collapsed && <div className="mt-8">{children}</div>}
     </section>
   );
 }
@@ -499,23 +501,25 @@ export default function Data({ routeMode = 'data' }) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-[32px] border border-theme-border bg-theme-surface p-6 shadow-sm">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+    <div className="space-y-8">
+      <div className="rounded-[32px] border border-theme-border/60 bg-theme-surface/80 backdrop-blur-2xl p-8 shadow-md hover:shadow-lg transition-shadow">
+        <div className="flex flex-col gap-8 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="h2 text-theme-text-primary">Dataset & Pipeline Monitor</h1>
-              <span className={`badge ${STATUS_STYLES[headerStatus] || STATUS_STYLES.unknown}`}>
+            <div className="flex flex-wrap items-center gap-4">
+              <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">
+                Dataset & Pipeline Monitor
+              </h1>
+              <span className={`badge px-3 py-1 font-bold uppercase tracking-wider backdrop-blur-md shadow-sm ${STATUS_STYLES[headerStatus] || STATUS_STYLES.unknown}`}>
                 {headerStatus}
               </span>
               {routeMode === 'leakage' && (
-                <span className="badge border-theme-primary/30 text-theme-primary">Leakage focus</span>
+                <span className="badge border-theme-primary/40 bg-theme-primary/10 text-theme-primary px-3 py-1 font-bold uppercase tracking-wider backdrop-blur-md shadow-sm">Leakage focus</span>
               )}
             </div>
-            <p className="mt-3 max-w-2xl text-sm text-theme-text-secondary">
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-theme-text-secondary">
               Extensible dataset observability across raw data, transformed stages, splits, tokenization, loaders, and leakage diagnostics.
             </p>
-            <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
               <MetricPill label="Task" value={report.metadata?.task || '-'} />
               <MetricPill label="Stages" value={summary.recorded_stage_count ?? report.metadata?.recorded_stage_count ?? '-'} />
               <MetricPill label="Checks" value={summary.total_checks ?? report.metadata?.total_checks ?? '-'} />

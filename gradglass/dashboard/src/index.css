@@ -83,13 +83,12 @@
 
   /* Cards */
   .card {
-    @apply transition-all duration-250 ease-in-out border border-transparent bg-theme-surface;
-    border-radius: 16px;
-    padding: 24px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    @apply relative overflow-hidden transition-all duration-500 ease-out border border-theme-border/50 bg-theme-surface/70 backdrop-blur-xl p-6;
+    border-radius: 28px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
   }
   .card:hover {
-    @apply -translate-y-[4px];
+    @apply -translate-y-1 shadow-lg border-theme-primary/30;
   }
 
   /* Specific states */
