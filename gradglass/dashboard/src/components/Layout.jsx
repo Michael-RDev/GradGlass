@@ -65,7 +65,9 @@ export default function Layout({ children }) {
               const target = runId ? `/run/${runId}${nav.runPath}` : nav.globalPath;
               const label = runId ? nav.runLabel : nav.globalLabel;
               const isActive = runId
-                ? location.pathname.includes(nav.runPath)
+                ? nav.runPath === '/data'
+                  ? (location.pathname.includes('/data') || location.pathname.includes('/leakage'))
+                  : location.pathname.includes(nav.runPath)
                 : location.pathname === nav.globalPath;
 
               return (
@@ -133,7 +135,9 @@ export default function Layout({ children }) {
                         const Icon = item.icon;
                         const fullPath = runId ? `/run/${runId}${item.path}` : '/';
                         // Keep simple active state matching for now
-                        const active = location.pathname.includes(item.path);
+                        const active = item.path === '/data'
+                          ? (location.pathname.includes('/data') || location.pathname.includes('/leakage'))
+                          : location.pathname.includes(item.path);
                         
                         return (
                           <Link

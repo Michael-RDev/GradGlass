@@ -28,6 +28,7 @@ export default function App() {
           <Route path="evaluation" element={<Evaluation />} />
           <Route path="internals" element={<ModelInternals />} />
           <Route path="data" element={<Data />} />
+          <Route path="leakage" element={<Data routeMode="leakage" />} />
           <Route path="infrastructure" element={<Infrastructure />} />
           <Route path="interpretability" element={<Interpretability />} />
           <Route path="compare" element={<Compare />} />

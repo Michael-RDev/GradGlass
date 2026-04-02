@@ -138,21 +138,17 @@ class Run:
         import sys
 
         env = {"python_version": sys.version}
-        try:
-            import torch
-
+        torch = sys.modules.get("torch")
+        if torch is not None:
             env["torch_version"] = torch.__version__
             env["cuda_available"] = torch.cuda.is_available()
             if torch.cuda.is_available():
                 env["cuda_version"] = torch.version.cuda
-        except ImportError:
-            pass
-        try:
-            import tensorflow as tf
-
-            env["tensorflow_version"] = tf.__version__
-        except (ImportError, AttributeError):
-            pass
+        tf = sys.modules.get("tensorflow")
+        if tf is not None:
+            tf_version = getattr(tf, "__version__", None)
+            if tf_version is not None:
+                env["tensorflow_version"] = tf_version
         meta = {
             "name": self.name,
             "run_id": self.run_id,
@@ -215,6 +211,10 @@ class Run:
         event: Optional[str] = None,
         monitor_enabled: Optional[bool] = None,
         monitor_port: Optional[int] = None,
+        monitor_pid: Any = _UNSET,
+        monitor_started_at: Any = _UNSET,
+        monitor_stopped_at: Any = _UNSET,
+        monitor_stop_reason: Any = _UNSET,
         current_step: Optional[int] = None,
         total_steps: Optional[int] = None,
         fatal_exception: Any = _UNSET,
@@ -243,6 +243,14 @@ class Run:
                     state["monitor_port"] = int(monitor_port)
                 except (TypeError, ValueError):
                     pass
+            if monitor_pid is not _UNSET:
+                state["monitor_pid"] = None if monitor_pid in (None, "") else int(monitor_pid)
+            if monitor_started_at is not _UNSET:
+                state["monitor_started_at"] = None if monitor_started_at in (None, "") else float(monitor_started_at)
+            if monitor_stopped_at is not _UNSET:
+                state["monitor_stopped_at"] = None if monitor_stopped_at in (None, "") else float(monitor_stopped_at)
+            if monitor_stop_reason is not _UNSET:
+                state["monitor_stop_reason"] = None if monitor_stop_reason in (None, "") else str(monitor_stop_reason)
             if total_steps is not None:
                 if total_steps > 0:
                     state["total_steps"] = int(total_steps)
@@ -362,6 +370,15 @@ class Run:
         from gradglass.server import _wait_for_server, find_free_port
 
         if self.server_process is not None and self.server_process.poll() is None and self.server_port is not None:
+            self._write_runtime_state(
+                event="monitor_server_reuse",
+                monitor_enabled=True,
+                monitor_port=self.server_port,
+                monitor_pid=self.server_process.pid,
+                monitor_stopped_at=None,
+                monitor_stop_reason=None,
+                current_step=self.step,
+            )
             return self.server_port
 
         actual_port = port or find_free_port()
@@ -379,6 +396,16 @@ class Run:
 
         self.server_process = process
         self.server_port = actual_port
+        self._write_runtime_state(
+            event="monitor_server_start",
+            monitor_enabled=True,
+            monitor_port=actual_port,
+            monitor_pid=process.pid,
+            monitor_started_at=time.time(),
+            monitor_stopped_at=None,
+            monitor_stop_reason=None,
+            current_step=self.step,
+        )
         return actual_port
 
     def log(self, **metrics):
@@ -425,6 +452,18 @@ class Run:
             tests=tests,
             save=True,
             print_summary=print_summary,
+        )
+
+    def monitor_dataset(self, task, dataset_name=None, task_hint=None, config=None):
+        from gradglass.analysis.data_monitor import DatasetMonitorBuilder
+
+        return DatasetMonitorBuilder(
+            task=task,
+            dataset_name=dataset_name or self.name,
+            task_hint=task_hint,
+            config=config,
+            run_dir=self.run_dir,
+            run_id=self.run_id,
         )
 
     def finish(self, open=False, analyze=True, print_summary=True):
@@ -540,14 +579,27 @@ class Run:
             if open_browser:
                 self._open_dashboard_browser(self.server_port)
             self._write_runtime_state(
-                event="monitor_reuse", monitor_enabled=True, monitor_port=self.server_port, current_step=self.step
+                event="monitor_reuse",
+                monitor_enabled=True,
+                monitor_port=self.server_port,
+                monitor_pid=self.server_process.pid if self.server_process is not None else None,
+                monitor_stopped_at=None,
+                monitor_stop_reason=None,
+                current_step=self.step,
             )
             return self.server_port
 
         actual_port = self._start_persistent_dashboard_server(port=port)
         self.server_port = actual_port
         self._write_runtime_state(
-            event="monitor_start", monitor_enabled=True, monitor_port=actual_port, current_step=self.step
+            event="monitor_start",
+            monitor_enabled=True,
+            monitor_port=actual_port,
+            monitor_pid=self.server_process.pid if self.server_process is not None else None,
+            monitor_started_at=time.time(),
+            monitor_stopped_at=None,
+            monitor_stop_reason=None,
+            current_step=self.step,
         )
         url = self._dashboard_run_url(actual_port)
         print(f"\U0001f52c GradGlass live monitor: {url}")
@@ -578,12 +630,22 @@ class Run:
             elif name == "test_y":
                 test_y = np.asarray(arr)
 
-        from gradglass.analysis.leakage import run_leakage_detection
+        from gradglass.analysis.leakage import build_monitor_report_for_arrays, project_monitor_report_to_legacy
 
-        save_path = self.run_dir / "analysis" / "leakage_report.json"
-        report = run_leakage_detection(
-            train_x=train_x, train_y=train_y, test_x=test_x, test_y=test_y, max_samples=max_samples, save_path=save_path
+        monitor_report = build_monitor_report_for_arrays(
+            train_x=train_x,
+            train_y=train_y,
+            test_x=test_x,
+            test_y=test_y,
+            max_samples=max_samples,
+            dataset_name=self.name,
+            run_dir=self.run_dir,
+            run_id=self.run_id,
+            save=True,
         )
+        report = project_monitor_report_to_legacy(monitor_report)
+        save_path = self.run_dir / "analysis" / "leakage_report.json"
+        report.save(save_path)
         if print_summary:
             status = "\u2705 ALL PASSED" if report.passed else f"\u274c {report.num_failed} FAILED"
             print(f"\n\U0001f50d Data Leakage Report: {status}")

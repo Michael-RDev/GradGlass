@@ -1,5 +1,6 @@
 from gradglass.core import gg
 from gradglass.analysis.registry import test, TestContext, TestResult, TestCategory, TestSeverity
+from gradglass.analysis.data_monitor import DatasetMonitorBuilder, DatasetMonitorConfig, DatasetMonitorReport
 from gradglass.analysis.leakage import LeakageDetector, LeakageReport as DataLeakageReport, run_leakage_detection
 
 __version__ = "1.0.0"
@@ -10,6 +11,9 @@ __all__ = [
     "TestResult",
     "TestCategory",
     "TestSeverity",
+    "DatasetMonitorBuilder",
+    "DatasetMonitorConfig",
+    "DatasetMonitorReport",
     "LeakageDetector",
     "DataLeakageReport",
     "run_leakage_detection",

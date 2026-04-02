@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from gradglass.alerts import build_alert_snapshot
+from gradglass.analysis.data_monitor import load_dataset_monitor_report
+from gradglass.analysis.leakage import project_monitor_report_to_legacy_dict
 from gradglass.artifacts import ArtifactStore
 from gradglass.browser import schedule_url_open_detached
 from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, architecture_diff
@@ -312,13 +314,29 @@ def create_app(store):
         if not run_dir.exists():
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
         report_path = run_dir / "analysis" / "leakage_report.json"
-        if not report_path.exists():
+        if report_path.exists():
+            with open(report_path) as f:
+                return json.load(f)
+        monitor_report = load_dataset_monitor_report(run_dir)
+        if monitor_report is not None:
+            return project_monitor_report_to_legacy_dict(monitor_report)
+        raise HTTPException(
+            status_code=404,
+            detail="No leakage report found for this run. Use run.check_leakage(), run.check_leakage_from_loaders(), or run.monitor_dataset(...).finalize() to generate one.",
+        )
+
+    @app.get("/api/runs/{run_id}/data-monitor")
+    async def get_data_monitor(run_id):
+        run_dir = store.get_run_dir(run_id)
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        report = load_dataset_monitor_report(run_dir)
+        if report is None:
             raise HTTPException(
                 status_code=404,
-                detail="No leakage report found for this run. Use run.check_leakage() or run.check_leakage_from_loaders() to generate one.",
+                detail="No dataset monitor report found for this run. Use run.monitor_dataset(...).finalize() or run.check_leakage(...) to generate one.",
             )
-        with open(report_path) as f:
-            return json.load(f)
+        return report.model_dump(mode="json")
 
     class MutationRequest(BaseModel):
         operation: str

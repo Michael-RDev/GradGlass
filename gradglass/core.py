@@ -62,6 +62,18 @@ class GradGlass:
         run = self.get_run(run_id)
         return run.analyze(**kwargs)
 
+    def monitor_dataset(self, task, dataset_name=None, task_hint=None, config=None, run_dir=None, run_id=None):
+        from gradglass.analysis.data_monitor import DatasetMonitorBuilder
+
+        return DatasetMonitorBuilder(
+            task=task,
+            dataset_name=dataset_name,
+            task_hint=task_hint,
+            config=config,
+            run_dir=run_dir,
+            run_id=run_id,
+        )
+
     def test(self):
         from gradglass.analysis.registry import test as test_decorator
 

@@ -112,7 +112,7 @@ export default function RunOverview() {
           </Link>
           <Link to={`/run/${encodeURIComponent(runId)}/leakage`}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-theme-surface-hover border border-theme-border text-theme-text-primary text-sm hover:bg-theme-bg transition-colors">
-            <Shield className="w-4 h-4" /> Leakage
+            <Shield className="w-4 h-4" /> Data Monitor
           </Link>
         </div>
       </div>

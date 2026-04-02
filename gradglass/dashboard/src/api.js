@@ -76,6 +76,10 @@ export async function fetchAnalysis(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/analysis`);
 }
 
+export async function fetchDataMonitor(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/data-monitor`);
+}
+
 export async function fetchLeakageReport(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/leakage`);
 }

@@ -17,6 +17,10 @@ def main():
     )
     monitor_parser.add_argument("--port", type=int, default=8432, help="Port to bind to")
     monitor_parser.add_argument("--no-browser", action="store_true", help="Don't open browser")
+    stop_parser = subparsers.add_parser("stop", help="Stop a detached GradGlass monitor server")
+    stop_parser.add_argument("run_id", nargs="?", help="Run ID whose detached monitor should be stopped")
+    stop_parser.add_argument("--port", type=int, default=None, help="Stop the GradGlass server listening on this port")
+    stop_parser.add_argument("--all", action="store_true", help="Stop all detached run monitor servers")
     analyze_parser = subparsers.add_parser("analyze", help="Run post-training analysis on a run")
     analyze_parser.add_argument("run_id", nargs="?", help="Run ID to analyze (latest if omitted)")
     analyze_parser.add_argument("--open", action="store_true", help="Open dashboard after analysis")
@@ -60,6 +64,25 @@ def main():
 
         app = create_app(gg.store)
         start_server_blocking(app, port=args.port, open_browser=not args.no_browser)
+    elif args.command == "stop":
+        from gradglass.core import gg
+        from gradglass.monitor_control import stop_gradglass_monitor
+
+        if args.all and args.run_id:
+            parser.error("Use --all without a run_id.")
+        if args.all and args.port is not None:
+            parser.error("Use --all without --port.")
+        if not args.all and args.port is None and not args.run_id:
+            parser.error("Specify a run_id, --port, or --all.")
+
+        results = stop_gradglass_monitor(gg.store, run_id=args.run_id, port=args.port, stop_all=args.all)
+        exit_code = 0
+        for result in results:
+            print(result.message)
+            if result.status in {"refused", "error", "not_found", "usage_error"}:
+                exit_code = 1
+        if exit_code:
+            raise SystemExit(exit_code)
     elif args.command == "analyze":
         from gradglass.core import gg
 

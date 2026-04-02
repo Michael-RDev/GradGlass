@@ -1,14 +1,26 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import time
-from collections import Counter
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Optional
 
 import numpy as np
+
+from gradglass.analysis.data_monitor.builder import DatasetMonitorBuilder
+from gradglass.analysis.data_monitor.models import CheckStatus, DatasetMonitorReport, PipelineStage, TaskType
+
+
+LEGACY_CHECK_IDS = {
+    "Train/test exact-sample overlap": "EXACT_OVERLAP",
+    "Duplicate samples within training set": "TRAIN_DUPLICATES",
+    "Duplicate samples within test set": "TEST_DUPLICATES",
+    "Train/test near-duplicate samples": "NEAR_DUPLICATES",
+    "Train/test label-distribution consistency": "LABEL_DISTRIBUTION",
+    "Train/test feature-statistics consistency": "FEATURE_STATS",
+    "Feature-target correlation check": "TARGET_CORRELATION",
+    "Preprocessing / scaler leakage": "PREPROCESSING_LEAKAGE",
+}
 
 
 @dataclass
@@ -16,7 +28,7 @@ class LeakageCheckResult:
     check_id: str
     title: str
     passed: bool
-    severity: str  # CRITICAL, HIGH, MEDIUM, LOW
+    severity: str
     details: dict = field(default_factory=dict)
     recommendation: str = ""
     duration_ms: float = 0.0
@@ -39,7 +51,7 @@ class LeakageReport:
     num_passed: int
     num_failed: int
     total_duration_ms: float
-    results: List[LeakageCheckResult] = field(default_factory=list)
+    results: list[LeakageCheckResult] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -47,28 +59,172 @@ class LeakageReport:
             "num_passed": self.num_passed,
             "num_failed": self.num_failed,
             "total_duration_ms": round(self.total_duration_ms, 2),
-            "results": [r.to_dict() for r in self.results],
+            "results": [result.to_dict() for result in self.results],
         }
 
     def save(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=4)
+        with open(path, "w") as handle:
+            json.dump(self.to_dict(), handle, indent=4)
 
     @classmethod
     def from_file(cls, path: Path) -> Optional["LeakageReport"]:
         if not path.exists():
             return None
-        with open(path) as f:
-            data = json.load(f)
-        results = [LeakageCheckResult(**r) for r in data.get("results", [])]
+        with open(path) as handle:
+            data = json.load(handle)
+        results = [LeakageCheckResult(**result) for result in data.get("results", [])]
         return cls(
-            passed=data["passed"],
-            num_passed=data["num_passed"],
-            num_failed=data["num_failed"],
-            total_duration_ms=data["total_duration_ms"],
+            passed=data.get("passed", False),
+            num_passed=data.get("num_passed", 0),
+            num_failed=data.get("num_failed", 0),
+            total_duration_ms=data.get("total_duration_ms", 0.0),
             results=results,
         )
+
+
+def _coerce_numpy(value):
+    if isinstance(value, np.ndarray):
+        return value
+    if hasattr(value, "detach") and hasattr(value, "cpu"):
+        return value.detach().cpu().numpy()
+    if hasattr(value, "numpy") and callable(value.numpy):
+        try:
+            return value.numpy()
+        except Exception:
+            return np.asarray(value)
+    return np.asarray(value)
+
+
+def _subset_arrays(
+    train_x: np.ndarray,
+    train_y: np.ndarray,
+    test_x: np.ndarray,
+    test_y: np.ndarray,
+    max_samples: int,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    rng = np.random.RandomState(random_state)
+    if len(train_x) > max_samples:
+        idx = rng.choice(len(train_x), max_samples, replace=False)
+        train_x = train_x[idx]
+        train_y = train_y[idx]
+    if len(test_x) > max_samples:
+        idx = rng.choice(len(test_x), max_samples, replace=False)
+        test_x = test_x[idx]
+        test_y = test_y[idx]
+    return train_x, train_y, test_x, test_y
+
+
+def _infer_task_from_labels(labels: np.ndarray) -> TaskType:
+    labels = np.asarray(labels)
+    if labels.size == 0:
+        return TaskType.UNKNOWN
+    flat = labels.reshape(-1)
+    if np.issubdtype(flat.dtype, np.integer):
+        return TaskType.CLASSIFICATION
+    unique_count = len(np.unique(flat))
+    if unique_count <= min(20, max(2, flat.size // 20)):
+        return TaskType.CLASSIFICATION
+    return TaskType.REGRESSION
+
+
+def _infer_run_dir_from_save_path(save_path: Path | None) -> Path | None:
+    if save_path is None:
+        return None
+    if save_path.parent.name == "analysis":
+        return save_path.parent.parent
+    return None
+
+
+def project_monitor_report_to_legacy(report: DatasetMonitorReport) -> LeakageReport:
+    results = []
+    for check in report.checks:
+        if check.category.value != "leakage":
+            continue
+        details = dict(check.payload)
+        if check.evidence:
+            details.setdefault("evidence", check.evidence)
+        if check.metrics:
+            for key, value in check.metrics.items():
+                details.setdefault(key, value)
+        results.append(
+            LeakageCheckResult(
+                check_id=LEGACY_CHECK_IDS.get(check.name, check.name.upper().replace("/", "_").replace(" ", "_")),
+                title=check.name,
+                passed=check.status == CheckStatus.PASSED,
+                severity=check.severity.value,
+                details=details,
+                recommendation=check.recommendation or "",
+                duration_ms=check.duration_ms,
+            )
+        )
+    num_passed = sum(1 for result in results if result.passed)
+    num_failed = sum(1 for result in results if not result.passed)
+    total_duration_ms = sum(result.duration_ms for result in results)
+    return LeakageReport(
+        passed=num_failed == 0,
+        num_passed=num_passed,
+        num_failed=num_failed,
+        total_duration_ms=total_duration_ms,
+        results=results,
+    )
+
+
+def project_monitor_report_to_legacy_dict(report: DatasetMonitorReport) -> dict:
+    return project_monitor_report_to_legacy(report).to_dict()
+
+
+def _save_standalone_monitor_report(report: DatasetMonitorReport, save_path: Path) -> None:
+    monitor_path = save_path.with_name("dataset_monitor.json")
+    summary_path = save_path.with_name("dataset_monitor_summary.txt")
+    with open(monitor_path, "w") as handle:
+        json.dump(report.model_dump(mode="json"), handle, indent=2)
+    with open(summary_path, "w") as handle:
+        handle.write(report.summary_text)
+
+
+def build_monitor_report_for_arrays(
+    train_x: np.ndarray,
+    train_y: np.ndarray,
+    test_x: np.ndarray,
+    test_y: np.ndarray,
+    *,
+    max_samples: int = 2000,
+    random_state: int | None = None,
+    dataset_name: str | None = None,
+    run_dir: Path | None = None,
+    run_id: str | None = None,
+    save: bool = True,
+) -> DatasetMonitorReport:
+    train_x = _coerce_numpy(train_x)
+    train_y = _coerce_numpy(train_y)
+    test_x = _coerce_numpy(test_x)
+    test_y = _coerce_numpy(test_y)
+    train_x, train_y, test_x, test_y = _subset_arrays(train_x, train_y, test_x, test_y, max_samples, random_state)
+    builder = DatasetMonitorBuilder(
+        task=_infer_task_from_labels(train_y),
+        dataset_name=dataset_name or "Leakage Detection Dataset",
+        task_hint="leakage_detection",
+        config={"sample_budget_per_split": max_samples, "random_seed": random_state or 0},
+        run_dir=run_dir,
+        run_id=run_id,
+    )
+    builder.record_stage(
+        PipelineStage.SPLITTING,
+        split="train",
+        data=train_x,
+        labels=train_y,
+        metadata={"source": "legacy_leakage_wrapper"},
+    )
+    builder.record_stage(
+        PipelineStage.SPLITTING,
+        split="test",
+        data=test_x,
+        labels=test_y,
+        metadata={"source": "legacy_leakage_wrapper"},
+    )
+    return builder.finalize(save=save)
 
 
 class LeakageDetector:
@@ -81,466 +237,24 @@ class LeakageDetector:
         max_samples: int = 2000,
         random_state: Optional[int] = None,
     ):
+        self.train_x = _coerce_numpy(train_x)
+        self.train_y = _coerce_numpy(train_y)
+        self.test_x = _coerce_numpy(test_x)
+        self.test_y = _coerce_numpy(test_y)
         self.max_samples = max_samples
-        rng = np.random.RandomState(random_state)
+        self.random_state = random_state
 
-        # Sub-sample if datasets are large
-        n_train = len(train_x)
-        n_test = len(test_x)
-
-        if n_train > max_samples:
-            idx = rng.choice(n_train, max_samples, replace=False)
-            train_x = train_x[idx]
-            train_y = train_y[idx]
-
-        if n_test > max_samples:
-            idx = rng.choice(n_test, max_samples, replace=False)
-            test_x = test_x[idx]
-            test_y = test_y[idx]
-
-        # Flatten features to 2D: (N, D)
-        self.train_x = train_x.reshape(len(train_x), -1).astype(np.float32)
-        self.train_y = train_y.flatten()
-        self.test_x = test_x.reshape(len(test_x), -1).astype(np.float32)
-        self.test_y = test_y.flatten()
-
-    def hash_rows(self, arr: np.ndarray) -> set:
-        hashes = set()
-        for row in arr:
-            h = hashlib.md5(row.tobytes()).hexdigest()
-            hashes.add(h)
-        return hashes
-
-    def check_exact_overlap(self) -> LeakageCheckResult:
-        t0 = time.time()
-        train_hashes = self.hash_rows(self.train_x)
-        test_hashes = self.hash_rows(self.test_x)
-        overlap = train_hashes & test_hashes
-        n_overlap = len(overlap)
-        passed = n_overlap == 0
-        duration = (time.time() - t0) * 1000
-
-        # Find indices of overlapping test samples
-        overlap_indices = []
-        if n_overlap > 0:
-            test_hash_list = []
-            for i, row in enumerate(self.test_x):
-                h = hashlib.md5(row.tobytes()).hexdigest()
-                if h in overlap:
-                    overlap_indices.append(i)
-                    if len(overlap_indices) >= 20:
-                        break
-
-        return LeakageCheckResult(
-            check_id="EXACT_OVERLAP",
-            title="Train/test exact-sample overlap",
-            passed=passed,
-            severity="CRITICAL",
-            details={
-                "num_overlapping": n_overlap,
-                "overlap_test_indices": overlap_indices[:20],
-                "train_size": len(self.train_x),
-                "test_size": len(self.test_x),
-            },
-            recommendation=(
-                f"{n_overlap} exact duplicates found between train and test. "
-                "This will cause overestimated evaluation metrics."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
+    def run_all(self) -> LeakageReport:
+        monitor_report = build_monitor_report_for_arrays(
+            self.train_x,
+            self.train_y,
+            self.test_x,
+            self.test_y,
+            max_samples=self.max_samples,
+            random_state=self.random_state,
+            save=False,
         )
-
-    def check_train_duplicates(self) -> LeakageCheckResult:
-        t0 = time.time()
-        hash_to_indices: dict[str, list[int]] = {}
-        for i, row in enumerate(self.train_x):
-            h = hashlib.md5(row.tobytes()).hexdigest()
-            hash_to_indices.setdefault(h, []).append(i)
-
-        dup_groups = {h: idxs for h, idxs in hash_to_indices.items() if len(idxs) > 1}
-        total_extra = sum(len(v) - 1 for v in dup_groups.values())
-        unique = len(hash_to_indices)
-        passed = len(dup_groups) == 0
-        duration = (time.time() - t0) * 1000
-
-        sample_groups = []
-        for h, idxs in list(dup_groups.items())[:5]:
-            sample_groups.append(idxs[:5])
-
-        return LeakageCheckResult(
-            check_id="TRAIN_DUPLICATES",
-            title="Duplicate samples within training set",
-            passed=passed,
-            severity="MEDIUM",
-            details={
-                "unique_samples": unique,
-                "num_duplicate_groups": len(dup_groups),
-                "total_extra_copies": total_extra,
-                "sample_groups": sample_groups,
-                "train_size": len(self.train_x),
-            },
-            recommendation=(
-                f"{total_extra} extra duplicate copies in training set across "
-                f"{len(dup_groups)} groups. May bias training."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_test_duplicates(self):
-        t0 = time.time()
-        hash_to_indices: dict[str, list[int]] = {}
-        for i, row in enumerate(self.test_x):
-            h = hashlib.md5(row.tobytes()).hexdigest()
-            hash_to_indices.setdefault(h, []).append(i)
-
-        dup_groups = {h: idxs for h, idxs in hash_to_indices.items() if len(idxs) > 1}
-        total_extra = sum(len(v) - 1 for v in dup_groups.values())
-        passed = len(dup_groups) == 0
-        duration = (time.time() - t0) * 1000
-
-        return LeakageCheckResult(
-            check_id="TEST_DUPLICATES",
-            title="Duplicate samples within test set",
-            passed=passed,
-            severity="MEDIUM",
-            details={
-                "num_duplicate_groups": len(dup_groups),
-                "total_extra_copies": total_extra,
-                "test_size": len(self.test_x),
-            },
-            recommendation=(
-                f"{total_extra} duplicate copies in test set. May distort evaluation metrics." if not passed else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_near_duplicates(self, threshold: float = 0.9999):
-        t0 = time.time()
-
-        # Normalize for cosine similarity
-        train_norm = self.train_x / (np.linalg.norm(self.train_x, axis=1, keepdims=True) + 1e-10)
-        test_norm = self.test_x / (np.linalg.norm(self.test_x, axis=1, keepdims=True) + 1e-10)
-
-        near_dup_pairs = []
-        chunk = 200
-        for i in range(0, len(train_norm), chunk):
-            sims = train_norm[i : i + chunk] @ test_norm.T
-            hits = np.argwhere(sims > threshold)
-            for ti, tei in hits:
-                near_dup_pairs.append(
-                    {"train_idx": int(i + ti), "test_idx": int(tei), "similarity": float(sims[ti, tei])}
-                )
-                if len(near_dup_pairs) >= 50:
-                    break
-            if len(near_dup_pairs) >= 50:
-                break
-
-        n_near = len(near_dup_pairs)
-        passed = n_near == 0
-        duration = (time.time() - t0) * 1000
-
-        return LeakageCheckResult(
-            check_id="NEAR_DUPLICATES",
-            title="Train/test near-duplicate samples",
-            passed=passed,
-            severity="HIGH",
-            details={
-                "num_near_duplicates": n_near,
-                "threshold": threshold,
-                "train_sampled": len(self.train_x),
-                "test_sampled": len(self.test_x),
-                "pairs": near_dup_pairs[:20],
-            },
-            recommendation=(
-                f"{n_near} near-duplicate pairs found (cosine sim > {threshold}). These may inflate evaluation metrics."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_label_distribution(self):
-        t0 = time.time()
-        train_counts = Counter(self.train_y.tolist())
-        test_counts = Counter(self.test_y.tolist())
-        all_labels = sorted(set(train_counts.keys()) | set(test_counts.keys()))
-
-        train_total = sum(train_counts.values())
-        test_total = sum(test_counts.values())
-
-        train_dist = {str(l): round(train_counts.get(l, 0) / train_total, 4) for l in all_labels}
-        test_dist = {str(l): round(test_counts.get(l, 0) / test_total, 4) for l in all_labels}
-
-        per_class_diff = {}
-        max_diff = 0.0
-        for l in all_labels:
-            diff = abs(train_dist[str(l)] - test_dist[str(l)])
-            per_class_diff[str(l)] = round(diff, 4)
-            max_diff = max(max_diff, diff)
-
-        passed = max_diff < 0.15  # Allow up to 15% difference per class
-        duration = (time.time() - t0) * 1000
-
-        return LeakageCheckResult(
-            check_id="LABEL_DISTRIBUTION",
-            title="Train/test label-distribution consistency",
-            passed=passed,
-            severity="MEDIUM",
-            details={
-                "train_distribution": train_dist,
-                "test_distribution": test_dist,
-                "max_absolute_diff": round(max_diff, 4),
-                "per_class_diff": per_class_diff,
-            },
-            recommendation=(
-                f"Label distributions differ significantly (max diff = {max_diff:.4f}). Check data splitting strategy."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_feature_stats(self):
-        t0 = time.time()
-
-        # Per-feature statistics (axis=0) to preserve per-feature signal
-        train_mean_per_feat = np.mean(self.train_x, axis=0)
-        test_mean_per_feat = np.mean(self.test_x, axis=0)
-        train_std_per_feat = np.std(self.train_x, axis=0)
-        test_std_per_feat = np.std(self.test_x, axis=0)
-
-        mean_diff = float(np.abs(train_mean_per_feat - test_mean_per_feat).mean())
-        std_ratio = float(
-            np.mean(
-                np.maximum(train_std_per_feat, test_std_per_feat)
-                / (np.minimum(train_std_per_feat, test_std_per_feat) + 1e-10)
-            )
-        )
-
-        passed = mean_diff < 0.5 and std_ratio < 2.0
-        duration = (time.time() - t0) * 1000
-
-        # Top-10 most drifted features by mean diff
-        feature_diffs = np.abs(train_mean_per_feat - test_mean_per_feat)
-        top_indices = np.argsort(feature_diffs)[::-1][:10].tolist()
-        top_drifted = [
-            {"feature_idx": int(fi), "mean_diff": round(float(feature_diffs[fi]), 6)}
-            for fi in top_indices
-        ]
-
-        return LeakageCheckResult(
-            check_id="FEATURE_STATS",
-            title="Train/test feature-statistics consistency",
-            passed=passed,
-            severity="MEDIUM",
-            details={
-                "mean_diff_avg": round(mean_diff, 6),
-                "std_ratio_avg": round(std_ratio, 4),
-                "num_features": int(self.train_x.shape[1]),
-                "top_drifted_features": top_drifted,
-            },
-            recommendation=(
-                f"Feature stats differ notably: mean_diff_avg={mean_diff:.4f}, std_ratio_avg={std_ratio:.4f}. "
-                "This may indicate different preprocessing or data drift."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_preprocessing_leakage(self) -> LeakageCheckResult:
-        """Detect scaler/normalizer fit on the full dataset before train/test split.
-
-        Mathematical basis: if a zero-mean scaler (e.g. StandardScaler) is fit on
-        the full dataset and the data is then split, the n-weighted combined
-        per-feature mean of the two splits is *exactly* 0 by definition:
-
-            (n_train * mean_train + n_test * mean_test) / N
-            = (n_train * mean_train + n_test * mean_test) / N
-            = mean_full  ≈  0
-
-        When the scaler is fit only on training data, the combined weighted mean
-        is (n_test / N) * (mean_test_raw - mean_train_raw) / std_train, which is
-        nonzero for most real datasets.
-        """
-        t0 = time.time()
-        n_train, n_test = len(self.train_x), len(self.test_x)
-
-        train_mean = np.mean(self.train_x, axis=0)  # (D,)
-        test_mean = np.mean(self.test_x, axis=0)    # (D,)
-        train_std = np.std(self.train_x, axis=0)    # (D,)
-
-        avg_train_mean_abs = float(np.abs(train_mean).mean())
-        avg_train_std_diff = float(np.abs(train_std - 1.0).mean())
-        avg_test_mean_abs = float(np.abs(test_mean).mean())
-
-        # --- Step 1: check whether train data looks standardised ---
-        train_looks_standardized = avg_train_mean_abs < 0.15 and avg_train_std_diff < 0.15
-
-        if not train_looks_standardized:
-            # Data does not appear to be standardised; check not applicable.
-            return LeakageCheckResult(
-                check_id="PREPROCESSING_LEAKAGE",
-                title="Preprocessing / scaler leakage",
-                passed=True,
-                severity="HIGH",
-                details={
-                    "avg_train_mean_abs": round(avg_train_mean_abs, 4),
-                    "avg_train_std_diff": round(avg_train_std_diff, 4),
-                    "note": "Data does not appear standardised; check not applicable.",
-                },
-                recommendation="",
-                duration_ms=(time.time() - t0) * 1000,
-            )
-
-        # --- Step 1b: if train mean is at floating-point precision the scaler
-        # was fit ONLY on the training split (fit_transform(X_train) gives
-        # mean=0 to ~1e-7).  Full-data scaling produces a train mean that is
-        # small but measurably non-zero: (n_test/N)*(mean_tr_raw-mean_te_raw)/std_full.
-        if avg_train_mean_abs < 1e-4:
-            return LeakageCheckResult(
-                check_id="PREPROCESSING_LEAKAGE",
-                title="Preprocessing / scaler leakage",
-                passed=True,
-                severity="HIGH",
-                details={
-                    "avg_train_mean_abs": round(avg_train_mean_abs, 8),
-                    "avg_train_std_diff": round(avg_train_std_diff, 4),
-                    "note": "Train mean is at floating-point precision; scaler was fit on training data only.",
-                },
-                recommendation="",
-                duration_ms=(time.time() - t0) * 1000,
-            )
-
-        # --- Step 2: compute n-weighted combined per-feature mean ---
-        combined_mean = (n_train * train_mean + n_test * test_mean) / (n_train + n_test)
-        avg_combined_abs = float(np.abs(combined_mean).mean())
-
-        # Full-data scaling  → combined_mean ≈ 0  (mathematical identity)
-        # Train-only scaling → combined_mean ≠ 0  (shifted by test/train discrepancy)
-        leakage_detected = avg_test_mean_abs < 0.15 and avg_combined_abs < 0.05
-
-        passed = not leakage_detected
-        duration = (time.time() - t0) * 1000
-
-        return LeakageCheckResult(
-            check_id="PREPROCESSING_LEAKAGE",
-            title="Preprocessing / scaler leakage",
-            passed=passed,
-            severity="HIGH",
-            details={
-                "avg_train_mean_abs": round(avg_train_mean_abs, 4),
-                "avg_train_std_diff": round(avg_train_std_diff, 4),
-                "avg_test_mean_abs": round(avg_test_mean_abs, 4),
-                "avg_combined_mean_abs": round(avg_combined_abs, 6),
-                "train_size": n_train,
-                "test_size": n_test,
-            },
-            recommendation=(
-                "Both train and test appear to have been scaled using the full dataset "
-                "(n-weighted combined per-feature mean ≈ 0, both splits near zero-mean). "
-                "Fit your scaler on training data only and use .transform() for test data."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def check_target_correlation(self, threshold: float = 0.95):
-        t0 = time.time()
-
-        # Combine train data for correlation
-        all_x = np.concatenate([self.train_x, self.test_x], axis=0)
-        all_y = np.concatenate([self.train_y, self.test_y], axis=0).astype(np.float32)
-
-        n_features = all_x.shape[1]
-        correlations = []
-        suspicious = []
-
-        # Sample features if too many
-        feature_indices = list(range(n_features))
-        if n_features > 1000:
-            feature_indices = sorted(np.random.choice(n_features, 1000, replace=False).tolist())
-
-        y_centered = all_y - np.mean(all_y)
-        y_std = np.std(all_y) + 1e-10
-
-        for fi in feature_indices:
-            col = all_x[:, fi]
-            col_centered = col - np.mean(col)
-            col_std = np.std(col) + 1e-10
-            corr = float(np.mean(col_centered * y_centered) / (col_std * y_std))
-            correlations.append({"feature_idx": fi, "correlation": round(corr, 6)})
-            if abs(corr) > threshold:
-                suspicious.append({"feature_idx": fi, "correlation": round(corr, 6)})
-
-        # Sort by absolute correlation descending
-        correlations.sort(key=lambda c: abs(c["correlation"]), reverse=True)
-
-        passed = len(suspicious) == 0
-        duration = (time.time() - t0) * 1000
-
-        return LeakageCheckResult(
-            check_id="TARGET_CORRELATION",
-            title="Feature-target correlation check",
-            passed=passed,
-            severity="HIGH",
-            details={
-                "num_suspicious": len(suspicious),
-                "threshold": threshold,
-                "suspicious_features": suspicious[:20],
-                "top_correlations": correlations[:10],
-            },
-            recommendation=(
-                f"{len(suspicious)} features have suspiciously high correlation with targets "
-                f"(|r| > {threshold}). This may indicate label leakage in features."
-                if not passed
-                else ""
-            ),
-            duration_ms=duration,
-        )
-
-    def run_all(self):
-        t0 = time.time()
-        checks = [
-            self.check_exact_overlap,
-            self.check_train_duplicates,
-            self.check_test_duplicates,
-            self.check_near_duplicates,
-            self.check_label_distribution,
-            self.check_feature_stats,
-            self.check_target_correlation,
-            self.check_preprocessing_leakage,
-        ]
-        results = []
-        for check_fn in checks:
-            try:
-                result = check_fn()
-            except Exception as e:
-                result = LeakageCheckResult(
-                    check_id=check_fn.__name__.replace("check_", "").upper(),
-                    title=f"Leakage check failed: {check_fn.__name__}",
-                    passed=False,
-                    severity="HIGH",
-                    details={"error": str(e)},
-                    recommendation="Check failed with an exception.",
-                )
-            results.append(result)
-
-        total_duration = (time.time() - t0) * 1000
-        num_passed = sum(1 for r in results if r.passed)
-        num_failed = sum(1 for r in results if not r.passed)
-
-        return LeakageReport(
-            passed=num_failed == 0,
-            num_passed=num_passed,
-            num_failed=num_failed,
-            total_duration_ms=total_duration,
-            results=results,
-        )
+        return project_monitor_report_to_legacy(monitor_report)
 
 
 def run_leakage_detection(
@@ -553,11 +267,20 @@ def run_leakage_detection(
     verbose: bool = True,
     random_state: Optional[int] = None,
 ) -> LeakageReport:
-    detector = LeakageDetector(
-        train_x=train_x, train_y=train_y, test_x=test_x, test_y=test_y,
-        max_samples=max_samples, random_state=random_state,
+    run_dir = _infer_run_dir_from_save_path(save_path)
+    monitor_report = build_monitor_report_for_arrays(
+        train_x,
+        train_y,
+        test_x,
+        test_y,
+        max_samples=max_samples,
+        random_state=random_state,
+        run_dir=run_dir,
+        save=run_dir is not None,
     )
-    report = detector.run_all()
+    if save_path is not None and run_dir is None:
+        _save_standalone_monitor_report(monitor_report, save_path)
+    report = project_monitor_report_to_legacy(monitor_report)
     if save_path is not None:
         report.save(save_path)
     if verbose:
@@ -566,26 +289,16 @@ def run_leakage_detection(
 
 
 def _print_leakage_report(report: LeakageReport) -> None:
-    """Print a human-readable summary of a LeakageReport."""
-    SEV_ICON = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
+    severity_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢", "INFO": "⚪"}
     overall = "✅ PASSED" if report.passed else "❌ FAILED"
     print(f"\n{'─' * 55}")
     print(f"  GradGlass Leakage Report  │  {overall}")
     print(f"  {report.num_passed} passed · {report.num_failed} failed · {report.total_duration_ms:.0f} ms")
     print(f"{'─' * 55}")
-    for r in report.results:
-        icon = SEV_ICON.get(r.severity, "⚪")
-        status = "PASS" if r.passed else "FAIL"
-        print(f"  [{status}] {icon} {r.title}")
-        if not r.passed and r.recommendation:
-            # Wrap recommendation to 70 chars
-            words, line = r.recommendation.split(), ""
-            for word in words:
-                if len(line) + len(word) + 1 > 70:
-                    print(f"         {line}")
-                    line = word
-                else:
-                    line = (line + " " + word).strip()
-            if line:
-                print(f"         {line}")
+    for result in report.results:
+        icon = severity_icon.get(result.severity, "⚪")
+        status = "PASS" if result.passed else "FAIL"
+        print(f"  [{status}] {icon} {result.title}")
+        if not result.passed and result.recommendation:
+            print(f"         {result.recommendation}")
     print(f"{'─' * 55}\n")
