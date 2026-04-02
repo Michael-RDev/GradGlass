@@ -68,7 +68,8 @@ export default function RunRouteController() {
       transitionedToTerminal &&
       sawLiveStatusRef.current &&
       !redirectedToOverviewRef.current &&
-      location.pathname !== overviewPath
+      location.pathname !== overviewPath &&
+      !location.pathname.endsWith('/internals')
     ) {
       redirectedToOverviewRef.current = true;
       navigate(overviewPath, { replace: true });

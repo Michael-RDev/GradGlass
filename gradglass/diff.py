@@ -143,7 +143,30 @@ def gradient_flow_analysis(gradient_summaries):
             flags.append('DISTRIBUTION_SHIFT')
         if grad_max < 1e-08:
             flags.append('DEAD')
-        result = {'layer': layer_name, 'grad_mean': grad_mean, 'grad_var': grad_var, 'grad_max': grad_max, 'grad_norm': grad_norm, 'kl_div': kl_div, 'flags': flags, 'num_steps': len(history), 'history': [{'step': h['step'], 'mean': h.get('mean', 0), 'norm': h.get('norm', 0)} for h in history]}
+        stability_status = 'healthy'
+        status_reason = 'Gradient norm is in a healthy range.'
+        if 'EXPLODING' in flags or grad_norm > 10:
+            stability_status = 'too_large'
+            status_reason = 'Gradient norm is unusually large and may indicate unstable updates.'
+        elif 'VANISHING' in flags or 'DEAD' in flags or grad_norm < 1e-05:
+            stability_status = 'too_small'
+            status_reason = 'Gradient norm is very small and may indicate slow or stalled learning.'
+        elif 'NOISY' in flags:
+            stability_status = 'noisy'
+            status_reason = 'Gradient direction appears noisy relative to its variance.'
+        result = {
+            'layer': layer_name,
+            'grad_mean': grad_mean,
+            'grad_var': grad_var,
+            'grad_max': grad_max,
+            'grad_norm': grad_norm,
+            'kl_div': kl_div,
+            'flags': flags,
+            'num_steps': len(history),
+            'stability_status': stability_status,
+            'stability_reason': status_reason,
+            'history': [{'step': h['step'], 'mean': h.get('mean', 0), 'norm': h.get('norm', 0)} for h in history],
+        }
         results.append(result)
     return results
 

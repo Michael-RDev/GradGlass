@@ -37,9 +37,7 @@ class Run:
         self.name = name
         self.store = store
         self.options = dict(options)
-        self.options["enable_benchmarks"] = _coerce_bool_option(
-            self.options.get("enable_benchmarks"), default=False
-        )
+        self.options["enable_benchmarks"] = _coerce_bool_option(self.options.get("enable_benchmarks"), default=False)
         self.auto_open = auto_open
         self.run_id = f"{name}-{time.strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
         self.run_dir = self.store.ensure_run_dir(self.run_id)
@@ -131,9 +129,7 @@ class Run:
             run.start_time = meta.get("start_time_epoch")
             run._git_commit = meta.get("git_commit")
             run.options = dict(meta.get("config") or {})
-            run.options["enable_benchmarks"] = _coerce_bool_option(
-                run.options.get("enable_benchmarks"), default=False
-            )
+            run.options["enable_benchmarks"] = _coerce_bool_option(run.options.get("enable_benchmarks"), default=False)
         else:
             run.name = run_id
         return run
@@ -271,8 +267,10 @@ class Run:
         optimizer=None,
         activations="auto",
         gradients="summary",
+        saliency="auto",
         layers="trainable",
         sample_batches=2,
+        probe_examples=16,
         every=50,
         monitor=None,
         monitor_port=None,
@@ -283,8 +281,10 @@ class Run:
         self.capture_config = {
             "activations": activations,
             "gradients": gradients,
+            "saliency": saliency,
             "layers": layers,
             "sample_batches": sample_batches,
+            "probe_examples": probe_examples,
             "every": every,
         }
         self.framework = self.detectframework(model)
@@ -303,11 +303,7 @@ class Run:
         from gradglass.capture import CaptureEngine
 
         self.engine = CaptureEngine(
-            model=model,
-            optimizer=optimizer,
-            framework=self.framework,
-            run_dir=self.run_dir,
-            config=self.capture_config,
+            model=model, optimizer=optimizer, framework=self.framework, run_dir=self.run_dir, config=self.capture_config
         )
         self.engine.attach_hooks()
         self.engine.extract_architecture()
@@ -369,21 +365,9 @@ class Run:
             return self.server_port
 
         actual_port = port or find_free_port()
-        cmd = [
-            sys.executable,
-            "-m",
-            "gradglass.server",
-            "--root",
-            str(self.store.root),
-            "--port",
-            str(actual_port),
-        ]
+        cmd = [sys.executable, "-m", "gradglass.server", "--root", str(self.store.root), "--port", str(actual_port)]
         process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
         )
         if not _wait_for_server("127.0.0.1", actual_port, timeout=10.0):
             process.terminate()
@@ -480,12 +464,7 @@ class Run:
         self.flush()
         event = "cancel"
         cancel_reason = reason or "manual stop"
-        self._write_runtime_state(
-            status="cancelled",
-            event=event,
-            current_step=self.step,
-            fatal_exception=None,
-        )
+        self._write_runtime_state(status="cancelled", event=event, current_step=self.step, fatal_exception=None)
         with self.lock:
             state = self._read_runtime_state()
             state["cancel_reason"] = str(cancel_reason)
@@ -507,12 +486,7 @@ class Run:
     def interrupt(self, reason: Optional[str] = None, open=False, analyze=False, print_summary=True):
         self.flush()
         interrupt_reason = reason or "training interrupted"
-        self._write_runtime_state(
-            status="interrupted",
-            event="interrupt",
-            current_step=self.step,
-            fatal_exception=None,
-        )
+        self._write_runtime_state(status="interrupted", event="interrupt", current_step=self.step, fatal_exception=None)
         with self.lock:
             state = self._read_runtime_state()
             state["interrupt_reason"] = str(interrupt_reason)

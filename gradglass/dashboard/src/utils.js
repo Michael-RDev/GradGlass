@@ -5,6 +5,9 @@ export const DEFAULT_METRIC_EXCLUDE_KEYS = new Set([
   'step',
   'timestamp',
   'fit_duration_s',
+  'epoch',
+  'epoch_idx',
+  'epoch_end',
   'lr',
   'learning_rate',
 ]);
@@ -17,15 +20,15 @@ function toFiniteNumber(value) {
 
 export function extractNumericSeries(metrics, key) {
   if (!Array.isArray(metrics) || !key) return [];
-  const out = [];
+  const byStep = new Map();
   for (const row of metrics) {
     if (!row || !(key in row)) continue;
     const step = toFiniteNumber(row.step);
     const value = toFiniteNumber(row[key]);
     if (step == null || value == null) continue;
-    out.push([step, value]);
+    byStep.set(step, value);
   }
-  return out;
+  return Array.from(byStep.entries()).sort((a, b) => a[0] - b[0]);
 }
 
 export function latestSeriesValue(series) {

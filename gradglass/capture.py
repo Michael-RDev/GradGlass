@@ -22,12 +22,20 @@ class CaptureEngine:
         self.write_queue = Queue()
         self.writer_thread = None
         self.running = True
+        self.probe_examples = max(1, int(config.get("probe_examples", 16) or 16))
+        self.saliency_mode = config.get("saliency", "auto")
+        self.activation_capture_counts = {}
+        self.latest_probe_activations = {}
+        self.cached_probe_activations = {}
+        self._capture_checkpoint_activations = True
+        self._capture_probe_activations = False
         self.writer_thread = threading.Thread(target=self.background_writer, daemon=True)
         self.writer_thread.start()
         (run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
         (run_dir / "gradients").mkdir(parents=True, exist_ok=True)
         (run_dir / "activations").mkdir(parents=True, exist_ok=True)
         (run_dir / "predictions").mkdir(parents=True, exist_ok=True)
+        (run_dir / "probes").mkdir(parents=True, exist_ok=True)
 
     def extract_architecture(self):
         if self.framework == "pytorch":
@@ -177,6 +185,125 @@ class CaptureEngine:
         elif self.framework == "tensorflow":
             self.attach_tensorflow_hooks()
 
+    @staticmethod
+    def _safe_key(name):
+        return "".join((ch if ch.isalnum() else "_" for ch in str(name)))
+
+    @staticmethod
+    def _to_numpy(value):
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray):
+            return value
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            if len(value) == 1:
+                return CaptureEngine._to_numpy(value[0])
+            try:
+                arr = np.asarray(value)
+                if arr.dtype != object:
+                    return arr
+            except Exception:
+                pass
+            return CaptureEngine._to_numpy(value[0])
+        if hasattr(value, "detach"):
+            return value.detach().cpu().numpy()
+        if hasattr(value, "numpy"):
+            return value.numpy()
+        try:
+            return np.asarray(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _slice_batch(value, limit):
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            return tuple(CaptureEngine._slice_batch(v, limit) for v in value)
+        if isinstance(value, list):
+            return [CaptureEngine._slice_batch(v, limit) for v in value]
+        try:
+            return value[:limit]
+        except Exception:
+            return value
+
+    @staticmethod
+    def _extract_primary_value(value):
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            return CaptureEngine._extract_primary_value(value[0])
+        return value
+
+    def _extract_primary_input_array(self, value):
+        primary = self._extract_primary_value(value)
+        arr = self._to_numpy(primary)
+        if arr is None:
+            return None
+        if getattr(arr, "ndim", 0) > 0:
+            return arr[: self.probe_examples]
+        return arr
+
+    @staticmethod
+    def _infer_input_modality(x_np):
+        if x_np is None:
+            return None
+        if x_np.ndim >= 4:
+            return "vision"
+        if x_np.ndim == 3:
+            return "sequence"
+        if x_np.ndim == 2:
+            return "structured_data"
+        return "scalar_or_label"
+
+    @staticmethod
+    def _looks_like_class_scores(y_np, y_pred_np):
+        if y_np is None or y_pred_np is None or getattr(y_pred_np, "ndim", 0) != 2:
+            return False
+        if getattr(y_np, "ndim", 0) > 1:
+            return False
+        if y_pred_np.shape[0] != y_np.shape[0] or y_pred_np.shape[1] <= 1:
+            return False
+        try:
+            float_arr = y_np.astype(float)
+        except (TypeError, ValueError, AttributeError):
+            return False
+        if np.any(~np.isfinite(float_arr)):
+            return False
+        return bool(np.all(np.isclose(float_arr, np.round(float_arr))))
+
+    @staticmethod
+    def _confidence_from_scores(scores):
+        scores = scores.astype(float)
+        if np.all(scores >= 0.0):
+            row_sums = scores.sum(axis=1)
+            if np.all(np.isclose(row_sums, 1.0, atol=1e-3)):
+                return np.max(scores, axis=1)
+        shifted = scores - np.max(scores, axis=1, keepdims=True)
+        exps = np.exp(shifted)
+        probs = exps / np.sum(exps, axis=1, keepdims=True)
+        return np.max(probs, axis=1)
+
+    @staticmethod
+    def _reduce_prediction_array(y_pred_np):
+        if y_pred_np is None:
+            return None, None, None
+        if getattr(y_pred_np, "ndim", 0) == 2 and y_pred_np.shape[1] > 1:
+            pred = np.argmax(y_pred_np, axis=-1)
+            confidence = CaptureEngine._confidence_from_scores(y_pred_np)
+            return pred, confidence, y_pred_np
+        return y_pred_np, None, None
+
+    def _reset_activation_capture_window(self):
+        self.activation_buffer.clear()
+        self.activation_capture_counts.clear()
+
+    def _reset_probe_window(self):
+        self.latest_probe_activations.clear()
+        self._reset_activation_capture_window()
+
     def attach_tensorflow_hooks(self):
         import tensorflow as tf
 
@@ -238,8 +365,6 @@ class CaptureEngine:
                     pass
 
     def attach_pytorch_hooks(self):
-        import torch
-
         layers_config = self.config.get("layers", "trainable")
         act_config = self.config.get("activations", "auto")
         sample_batches = self.config.get("sample_batches", 2)
@@ -264,8 +389,6 @@ class CaptureEngine:
                         self.hooks.append(hook)
 
     def make_forward_hook(self, layer_name, sample_batches):
-        batch_count = [0]
-
         def hook(module, input, output):
             try:
                 if hasattr(output, "shape"):
@@ -273,18 +396,18 @@ class CaptureEngine:
                     self.update_layer_shape(layer_name, input, shape)
             except Exception:
                 pass
-            if batch_count[0] < sample_batches:
+            act_data = self._to_numpy(output)
+            if act_data is None:
+                return
+            if self._capture_checkpoint_activations:
+                batch_count = self.activation_capture_counts.get(layer_name, 0)
+                if batch_count < sample_batches:
+                    self.activation_buffer.setdefault(layer_name, []).append(act_data)
+                    self.activation_capture_counts[layer_name] = batch_count + 1
+            if self._capture_probe_activations:
                 try:
-                    if hasattr(output, "detach"):
-                        act_data = output.detach().cpu().numpy()
-                    elif hasattr(output, "numpy"):
-                        act_data = output.numpy()
-                    else:
-                        act_data = np.array(output)
-                    if layer_name not in self.activation_buffer:
-                        self.activation_buffer[layer_name] = []
-                    self.activation_buffer[layer_name].append(act_data)
-                    batch_count[0] += 1
+                    probe_slice = act_data[: self.probe_examples] if getattr(act_data, "ndim", 0) > 0 else act_data
+                    self.latest_probe_activations[layer_name] = np.asarray(probe_slice)
                 except Exception:
                     pass
 
@@ -329,6 +452,220 @@ class CaptureEngine:
                 json.dump(structure, f, indent=2)
         except Exception:
             pass
+
+    def _call_model(self, model_input):
+        if isinstance(model_input, tuple):
+            return self.model(*model_input)
+        if isinstance(model_input, list):
+            return self.model(*model_input)
+        return self.model(model_input)
+
+    def _capture_pytorch_probe_bundle(self, x):
+        import torch
+
+        probe_input = self._slice_batch(x, self.probe_examples)
+        primary_input = self._extract_primary_value(probe_input)
+
+        bundle = {
+            "activation_arrays": {},
+            "prediction_array": None,
+            "confidence_array": None,
+            "logits_array": None,
+            "saliency_array": None,
+            "saliency_reason": "Not captured for this run.",
+            "saliency_kind": None,
+        }
+
+        if probe_input is None:
+            bundle["saliency_reason"] = "No input batch was available for probe capture."
+            return bundle
+
+        was_training = bool(getattr(self.model, "training", False))
+        self.latest_probe_activations.clear()
+        prev_checkpoint_capture = self._capture_checkpoint_activations
+        self._capture_checkpoint_activations = False
+        self._capture_probe_activations = True
+
+        try:
+            self.model.eval()
+            with torch.enable_grad():
+                outputs = self._call_model(probe_input)
+                output_np = self._to_numpy(outputs)
+                pred_array, confidence_array, logits_array = self._reduce_prediction_array(output_np)
+                bundle["prediction_array"] = pred_array
+                bundle["confidence_array"] = confidence_array
+                bundle["logits_array"] = logits_array
+                bundle["activation_arrays"] = {
+                    layer: np.asarray(values)
+                    for layer, values in self.latest_probe_activations.items()
+                }
+
+                saliency_disabled = str(self.saliency_mode).lower() == "off"
+                if saliency_disabled:
+                    bundle["saliency_reason"] = "Saliency capture was disabled for this run."
+                elif primary_input is None or not torch.is_tensor(primary_input):
+                    bundle["saliency_reason"] = "Saliency capture currently supports a single tensor input."
+                elif not primary_input.is_floating_point():
+                    bundle["saliency_reason"] = "Saliency capture is unavailable for non-floating-point inputs."
+                elif primary_input.ndim not in (2, 4):
+                    bundle["saliency_reason"] = "Saliency capture currently supports structured vectors and vision tensors."
+                elif not torch.is_tensor(outputs):
+                    bundle["saliency_reason"] = "Model outputs could not be converted into a saliency target."
+                else:
+                    grad_input = probe_input
+                    if isinstance(probe_input, tuple) or isinstance(probe_input, list):
+                        bundle["saliency_reason"] = "Saliency capture currently supports a single tensor input."
+                    else:
+                        grad_input = probe_input.detach().clone()
+                        grad_input.requires_grad_(True)
+                        self.latest_probe_activations.clear()
+                        outputs = self._call_model(grad_input)
+                        if outputs.ndim == 1:
+                            selected = outputs.sum()
+                            bundle["prediction_array"] = self._to_numpy(outputs)
+                        elif outputs.ndim >= 2:
+                            flat_outputs = outputs.reshape(outputs.shape[0], -1)
+                            indices = flat_outputs.argmax(dim=1, keepdim=True)
+                            selected = flat_outputs.gather(1, indices).sum()
+                            bundle["prediction_array"] = indices.detach().cpu().numpy().reshape(-1)
+                            bundle["confidence_array"] = self._confidence_from_scores(flat_outputs.detach().cpu().numpy())
+                            bundle["logits_array"] = flat_outputs.detach().cpu().numpy()
+                        else:
+                            selected = outputs.sum()
+
+                        try:
+                            self.model.zero_grad(set_to_none=True)
+                        except TypeError:
+                            self.model.zero_grad()
+                        selected.backward()
+                        bundle["saliency_array"] = grad_input.grad.detach().abs().cpu().numpy()
+                        bundle["saliency_kind"] = "vision" if grad_input.ndim == 4 else "structured"
+                        bundle["saliency_reason"] = None
+                        bundle["activation_arrays"] = {
+                            layer: np.asarray(values)
+                            for layer, values in self.latest_probe_activations.items()
+                        }
+                        try:
+                            self.model.zero_grad(set_to_none=True)
+                        except TypeError:
+                            self.model.zero_grad()
+        except Exception as exc:
+            bundle["saliency_reason"] = f"Probe capture failed: {exc}"
+        finally:
+            self._capture_probe_activations = False
+            self._capture_checkpoint_activations = prev_checkpoint_capture
+            if was_training:
+                self.model.train()
+            self.latest_probe_activations.clear()
+
+        return bundle
+
+    def _capture_tensorflow_probe_bundle(self, x):
+        bundle = {
+            "activation_arrays": {},
+            "prediction_array": None,
+            "confidence_array": None,
+            "logits_array": None,
+            "saliency_array": None,
+            "saliency_reason": "Saliency capture is currently unavailable for TensorFlow runs.",
+            "saliency_kind": None,
+        }
+
+        if not hasattr(self, "_tf_activation_extractors"):
+            return bundle
+
+        probe_input = self._slice_batch(x, self.probe_examples)
+        if probe_input is None:
+            bundle["saliency_reason"] = "No input batch was available for probe capture."
+            return bundle
+
+        try:
+            outputs = self.model(probe_input, training=False)
+            output_np = self._to_numpy(outputs)
+            pred_array, confidence_array, logits_array = self._reduce_prediction_array(output_np)
+            bundle["prediction_array"] = pred_array
+            bundle["confidence_array"] = confidence_array
+            bundle["logits_array"] = logits_array
+        except Exception:
+            pass
+
+        for layer_name, extractor in getattr(self, "_tf_activation_extractors", {}).items():
+            try:
+                act_output = extractor(probe_input, training=False)
+                act_np = self._to_numpy(act_output)
+                if act_np is not None:
+                    bundle["activation_arrays"][layer_name] = act_np
+            except Exception:
+                continue
+
+        return bundle
+
+    def _write_probe_bundle(
+        self,
+        *,
+        step,
+        timestamp,
+        primary_input,
+        y_true_array,
+        prediction_array,
+        confidence_array,
+        logits_array,
+        activation_arrays,
+        saliency_array,
+        saliency_kind,
+        saliency_reason,
+    ):
+        probe_dir = self.run_dir / "probes"
+        data_path = probe_dir / f"probe_step_{step}.npz"
+        meta_path = probe_dir / f"probe_step_{step}.json"
+
+        tensors = {}
+        activation_meta = []
+
+        input_np = self._to_numpy(primary_input)
+        if input_np is not None:
+            if getattr(input_np, "ndim", 0) > 0:
+                input_np = input_np[: self.probe_examples]
+            tensors["input"] = np.asarray(input_np)
+
+        if y_true_array is not None:
+            tensors["targets"] = np.asarray(y_true_array)
+        if prediction_array is not None:
+            tensors["predictions"] = np.asarray(prediction_array)
+        if confidence_array is not None:
+            tensors["confidence"] = np.asarray(confidence_array)
+        if logits_array is not None:
+            tensors["logits"] = np.asarray(logits_array)
+        if saliency_array is not None:
+            tensors["saliency"] = np.asarray(saliency_array)
+
+        for layer_name, values in sorted((activation_arrays or {}).items()):
+            arr = np.asarray(values)
+            key = f"activation__{self._safe_key(layer_name)}"
+            tensors[key] = arr
+            activation_meta.append({"layer": layer_name, "key": key, "shape": list(arr.shape)})
+
+        np.savez_compressed(str(data_path), **tensors)
+
+        input_modality = self._infer_input_modality(tensors.get("input"))
+        meta = {
+            "step": step,
+            "timestamp": float(timestamp),
+            "probe_examples": int(tensors.get("input").shape[0]) if isinstance(tensors.get("input"), np.ndarray) and tensors["input"].ndim > 0 else 0,
+            "input_modality": input_modality,
+            "input_shape": list(tensors["input"].shape) if isinstance(tensors.get("input"), np.ndarray) else None,
+            "target_shape": list(tensors["targets"].shape) if isinstance(tensors.get("targets"), np.ndarray) else None,
+            "prediction_shape": list(tensors["predictions"].shape) if isinstance(tensors.get("predictions"), np.ndarray) else None,
+            "activation_layers": activation_meta,
+            "saliency": {
+                "available": saliency_array is not None,
+                "kind": saliency_kind,
+                "reason": saliency_reason,
+                "shape": list(np.asarray(saliency_array).shape) if saliency_array is not None else None,
+            },
+        }
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2, default=str)
 
     def save_checkpoint(self, step, tag=None):
         ckpt_dir = self.run_dir / "checkpoints"
@@ -419,10 +756,15 @@ class CaptureEngine:
                         np.save(filepath, act_data)
                     except Exception:
                         pass
+            self._reset_activation_capture_window()
             return
 
         # PyTorch path: flush activation buffer populated by forward hooks
-        for layer_name, act_list in self.activation_buffer.items():
+        activation_source = self.activation_buffer
+        if not activation_source and self.cached_probe_activations:
+            activation_source = {layer: [arr] for layer, arr in self.cached_probe_activations.items()}
+
+        for layer_name, act_list in activation_source.items():
             if not act_list:
                 continue
             safe_name = layer_name.replace(".", "_")
@@ -440,7 +782,7 @@ class CaptureEngine:
                 stats_path = act_dir / f"{safe_name}_step_{step}_stats.json"
                 with open(stats_path, "w") as f:
                     json.dump(stats, f, indent=2)
-        self.activation_buffer.clear()
+        self._reset_activation_capture_window()
 
     @staticmethod
     def detect_leakage(x, y):
@@ -449,89 +791,90 @@ class CaptureEngine:
     def log_batch_predictions(self, step, x, y, y_pred, loss):
         pred_dir = self.run_dir / "predictions"
         try:
-
-            def to_np(t):
-                if t is None:
-                    return None
-                if hasattr(t, "detach"):
-                    return t.detach().cpu().numpy()
-                if hasattr(t, "numpy"):
-                    return t.numpy()
-                return np.array(t)
-
-            def shape_list(t):
-                arr = to_np(t)
-                return list(arr.shape) if arr is not None else None
-
-            def is_integer_like(arr):
-                if arr is None:
-                    return False
-                try:
-                    float_arr = arr.astype(float)
-                except (TypeError, ValueError):
-                    return False
-                if np.any(~np.isfinite(float_arr)):
-                    return False
-                return bool(np.all(np.isclose(float_arr, np.round(float_arr))))
-
-            def infer_input_modality(x_np):
-                if x_np is None:
-                    return None
-                if x_np.ndim >= 4:
-                    return "vision"
-                if x_np.ndim == 3:
-                    return "sequence"
-                if x_np.ndim == 2:
-                    return "structured_data"
-                return "scalar_or_label"
-
-            def looks_like_class_scores(y_np, y_pred_np):
-                if y_np is None or y_pred_np is None or y_pred_np.ndim != 2:
-                    return False
-                if y_np.ndim > 1:
-                    return False
-                if y_pred_np.shape[0] != y_np.shape[0] or y_pred_np.shape[1] <= 1:
-                    return False
-                return is_integer_like(y_np)
-
-            def confidence_from_scores(scores):
-                scores = scores.astype(float)
-                if np.all(scores >= 0.0):
-                    row_sums = scores.sum(axis=1)
-                    if np.all(np.isclose(row_sums, 1.0, atol=1e-3)):
-                        return np.max(scores, axis=1)
-                shifted = scores - np.max(scores, axis=1, keepdims=True)
-                exps = np.exp(shifted)
-                probs = exps / np.sum(exps, axis=1, keepdims=True)
-                return np.max(probs, axis=1)
-
-            y_np = to_np(y)
-            x_np = to_np(x)
-            y_pred_np = to_np(y_pred)
-            record = {"step": step, "timestamp": time.time()}
-            if shape_list(x) is not None:
-                record["input_shape"] = shape_list(x)
-                record["input_modality_hint"] = infer_input_modality(x_np)
+            timestamp = time.time()
+            x_np = self._extract_primary_input_array(x)
+            y_np = self._to_numpy(y)
+            if y_np is not None and getattr(y_np, "ndim", 0) > 0:
+                y_np = y_np[: self.probe_examples]
+            y_pred_np = self._to_numpy(y_pred)
+            record = {"step": step, "timestamp": timestamp}
+            if x_np is not None:
+                record["input_shape"] = list(x_np.shape)
+                record["input_modality_hint"] = self._infer_input_modality(x_np)
             if y_np is not None:
                 record["target_shape"] = list(y_np.shape)
-                record["y_true"] = y_np[:256].tolist() if len(y_np) > 256 else y_np.tolist()
+                if getattr(y_np, "ndim", 0) == 0:
+                    record["y_true"] = y_np.tolist()
+                else:
+                    record["y_true"] = y_np[:256].tolist() if len(y_np) > 256 else y_np.tolist()
             if y_pred_np is not None:
                 record["prediction_shape"] = list(y_pred_np.shape)
-                if looks_like_class_scores(y_np, y_pred_np):
+                if self._looks_like_class_scores(y_np, y_pred_np):
                     pred_classes = np.argmax(y_pred_np, axis=-1)
-                    confidence = confidence_from_scores(y_pred_np)
+                    confidence = self._confidence_from_scores(y_pred_np)
                     record["y_pred"] = pred_classes[:256].tolist()
                     record["confidence"] = confidence[:256].tolist()
                     record["logits_sample"] = y_pred_np[:16].tolist()
                     record["prediction_type"] = "class_scores"
                 else:
-                    record["y_pred"] = y_pred_np[:256].tolist()
-                    record["prediction_type"] = "numeric_array" if y_pred_np.ndim > 1 else "numeric_vector"
+                    if getattr(y_pred_np, "ndim", 0) == 0:
+                        record["y_pred"] = y_pred_np.tolist()
+                    else:
+                        record["y_pred"] = y_pred_np[:256].tolist()
+                    record["prediction_type"] = "numeric_array" if getattr(y_pred_np, "ndim", 0) > 1 else "numeric_vector"
             if loss is not None:
-                record["loss"] = float(loss) if np.isscalar(loss) else float(to_np(loss))
+                loss_np = self._to_numpy(loss)
+                record["loss"] = float(loss) if np.isscalar(loss) else float(loss_np)
             filepath = pred_dir / f"probe_step_{step}.json"
             with open(filepath, "w") as f:
                 json.dump(record, f, indent=2, default=str)
+
+            if self.framework == "pytorch":
+                probe_bundle = self._capture_pytorch_probe_bundle(x)
+            elif self.framework == "tensorflow":
+                probe_bundle = self._capture_tensorflow_probe_bundle(x)
+            else:
+                probe_bundle = {
+                    "activation_arrays": {},
+                    "prediction_array": None,
+                    "confidence_array": None,
+                    "logits_array": None,
+                    "saliency_array": None,
+                    "saliency_reason": "Probe capture is unavailable for this framework.",
+                    "saliency_kind": None,
+                }
+
+            prediction_array = probe_bundle.get("prediction_array")
+            confidence_array = probe_bundle.get("confidence_array")
+            logits_array = probe_bundle.get("logits_array")
+            activation_arrays = probe_bundle.get("activation_arrays") or {}
+            self.cached_probe_activations = {
+                layer: np.asarray(values)
+                for layer, values in activation_arrays.items()
+            }
+
+            if prediction_array is None and y_pred_np is not None:
+                y_pred_probe = y_pred_np[: self.probe_examples] if getattr(y_pred_np, "ndim", 0) > 0 else y_pred_np
+                prediction_array, confidence_guess, logits_guess = self._reduce_prediction_array(y_pred_probe)
+                if confidence_array is None:
+                    confidence_array = confidence_guess
+                if logits_array is None:
+                    logits_array = logits_guess
+
+            self._write_probe_bundle(
+                step=step,
+                timestamp=timestamp,
+                primary_input=x_np,
+                y_true_array=y_np,
+                prediction_array=prediction_array,
+                confidence_array=confidence_array,
+                logits_array=logits_array,
+                activation_arrays=activation_arrays,
+                saliency_array=probe_bundle.get("saliency_array"),
+                saliency_kind=probe_bundle.get("saliency_kind"),
+                saliency_reason=probe_bundle.get("saliency_reason"),
+            )
+            self._reset_probe_window()
         except Exception:
             pass
 

@@ -87,7 +87,7 @@ class BaseExperimentAdapter:
         latest_val_loss = val_loss[-1][1] if val_loss else None
         current_lr = lr_history[-1][1] if lr_history else None
 
-        elapsed_time_s = self._resolve_elapsed_time()
+        elapsed_time_s = self._resolve_elapsed_time(status=status)
         eta_s, eta_reason = self._estimate_eta(status=status, current_step=current_step, total_steps=total_steps)
 
         heartbeat_ts = self._resolve_heartbeat()
@@ -198,7 +198,7 @@ class BaseExperimentAdapter:
             return current_step, "completion_fallback"
         return None, "unknown"
 
-    def _resolve_elapsed_time(self) -> float:
+    def _resolve_elapsed_time(self, *, status: Optional[str] = None) -> float:
         start_ts = _safe_float(self.runtime_state.get("start_time_epoch"))
         if start_ts is None:
             start_ts = _safe_float(self.metadata.get("start_time_epoch"))
@@ -209,6 +209,17 @@ class BaseExperimentAdapter:
 
         if start_ts is None:
             return 0.0
+
+        resolved_status = status or _normalize_run_status(self.runtime_state.get("status") or self.metadata.get("status"))
+        if resolved_status in TERMINAL_STATUSES:
+            end_ts = _safe_float(self.runtime_state.get("last_event_ts"))
+            if end_ts is None:
+                end_ts = _safe_float(self.runtime_state.get("heartbeat_ts"))
+            if end_ts is None:
+                end_ts = _latest_metric_timestamp(self.metrics)
+            if end_ts is not None:
+                return max(0.0, end_ts - start_ts)
+
         return max(0.0, self.now_ts - start_ts)
 
     def _resolve_heartbeat(self) -> Optional[float]:

@@ -91,8 +91,8 @@ function GroupNode({ data }) {
         width: data.width,
         height: data.height,
         background: c.group,
-        border: `2px dashed ${c.dash}`,
-        boxShadow: data.collapsed ? 'none' : c.glow,
+        border: `2px dashed ${data.selected ? '#f8fafc' : c.dash}`,
+        boxShadow: data.selected ? '0 0 0 2px rgba(248,250,252,0.18), 0 0 20px rgba(255,255,255,0.12)' : data.collapsed ? 'none' : c.glow,
         transition: 'box-shadow 0.2s, height 0.25s',
         position: 'relative',
       }}
@@ -126,7 +126,7 @@ function LeafNode({ data, isConnectable }) {
   return (
     <div
       className={`rounded-lg border px-3 py-2 min-w-[130px] select-none transition-all hover:brightness-110 ${c.node} ${isFrozen ? 'opacity-50' : ''}`}
-      style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}
+      style={{ boxShadow: data.selected ? '0 0 0 2px rgba(248,250,252,0.2), 0 6px 18px rgba(0,0,0,0.45)' : '0 2px 8px rgba(0,0,0,0.4)' }}
     >
       <Handle type="target" position={Position.Top} isConnectable={isConnectable} style={{ background: '#64748b', border: 'none' }} />
       <div className="font-mono text-[10px] font-bold text-white/90 leading-tight truncate max-w-[160px]"
@@ -310,7 +310,7 @@ function isNotFoundError(message) {
 // ─────────────────────────────────────────────────────────────────
 // Build ReactFlow nodes + edges from backend data
 // ─────────────────────────────────────────────────────────────────
-function buildGraph(architecture, collapsed, onToggle) {
+function buildGraph(architecture, collapsed, onToggle, selectedNodeId) {
   const layers = architecture.layers || []
   const backendEdges = architecture.edges || []
   const rootType = architecture.root_type || 'Model'
@@ -389,6 +389,7 @@ function buildGraph(architecture, collapsed, onToggle) {
         height: sz.height,
         collapsed: isCollapsed,
         childCount,
+        selected: selectedNodeId === gid,
         onToggle: () => onToggle(gid),
       },
       style: { width: sz.width, height: sz.height },
@@ -418,6 +419,7 @@ function buildGraph(architecture, collapsed, onToggle) {
             category: layer.category || 'model',
             paramCount: layer.param_count || 0,
             trainable: layer.trainable !== false,
+            selected: selectedNodeId === cid,
           },
           zIndex: 5,
         })
@@ -501,7 +503,7 @@ function inferEdgeLabel(src, dst) {
 // ─────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────
-export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClass = "h-[calc(100vh-100px)]" }) {
+export default function ArchitectureGraph({ hideHeader, onNodeSelect, selectedNodeId = null, heightClass = "h-[calc(100vh-100px)]" }) {
   const { runId } = useParams()
   const [architecture, setArchitecture] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -526,10 +528,10 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
   // Rebuild graph whenever architecture or collapsed state changes
   useEffect(() => {
     if (!architecture?.layers?.length) return
-    const { rfNodes, rfEdges } = buildGraph(architecture, collapsed, onToggle)
+    const { rfNodes, rfEdges } = buildGraph(architecture, collapsed, onToggle, selectedNodeId)
     setNodes(rfNodes)
     setEdges(rfEdges)
-  }, [architecture, collapsed, onToggle, setNodes, setEdges])
+  }, [architecture, collapsed, onToggle, selectedNodeId, setNodes, setEdges])
 
   useEffect(() => {
     let cancelled = false
@@ -582,7 +584,8 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
   )
 
   const onNodeClick = useCallback((_, node) => {
-    if (node.type === 'leaf') {
+    const hasLeaflessGroupData = node.type === 'group' && layerMap[node.id] && (layerMap[node.id].children || []).length === 0
+    if (node.type === 'leaf' || hasLeaflessGroupData) {
       const selected = layerMap[node.id] || null;
       setSelectedNode(selected);
       if (onNodeSelect) onNodeSelect(selected);
@@ -596,6 +599,25 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
     setSelectedNode(null);
     if (onNodeSelect) onNodeSelect(null);
   }, [onNodeSelect])
+
+  useEffect(() => {
+    if (!selectedNodeId || !layerMap[selectedNodeId]) {
+      return
+    }
+
+    const selected = layerMap[selectedNodeId]
+    setSelectedNode(selected)
+    if (onNodeSelect) onNodeSelect(selected)
+
+    let ancestorId = selectedNodeId
+    while (layerMap[ancestorId]?.parent && layerMap[ancestorId].parent !== '__root__') {
+      ancestorId = layerMap[ancestorId].parent
+    }
+
+    if (ancestorId && collapsed[ancestorId]) {
+      setCollapsed((prev) => ({ ...prev, [ancestorId]: false }))
+    }
+  }, [collapsed, layerMap, onNodeSelect, selectedNodeId])
 
   if (loading) return <LoadingSpinner />
   if (error) return <ErrorMessage message={error} />
@@ -703,6 +725,10 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
 
         {/* Inspector */}
         <div className="w-80 shrink-0 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
+          <div className="rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-slate-300 shadow-sm">
+            <p className="text-sm">Click a leaf node to inspect its properties.</p>
+            <p className="text-xs mt-2 text-slate-500">Click a dashed group border to collapse/expand.</p>
+          </div>
           {selectedNode ? (
             <div className="card bg-slate-900/80 backdrop-blur-md border-indigo-500/30 shadow-[0_0_30px_rgba(99,102,241,0.1)]">
               <div className="flex items-center gap-3 mb-4 pb-4 border-b border-slate-800">
@@ -771,8 +797,8 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
           ) : (
             <div className="card h-full flex flex-col items-center justify-center text-center py-16 text-slate-500 border-dashed">
               <Network className="w-10 h-10 text-slate-700 mb-3" />
-              <p className="text-sm">Click a leaf node to inspect its properties.</p>
-              <p className="text-xs mt-2 text-slate-600">Click a dashed group border to collapse/expand.</p>
+              <p className="text-sm">Select a layer to open the inspector.</p>
+              <p className="text-xs mt-2 text-slate-600">The graph stays interactive after training completes.</p>
             </div>
           )}
         </div>

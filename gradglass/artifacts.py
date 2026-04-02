@@ -17,7 +17,7 @@ class ArtifactStore:
     def ensure_run_dir(self, run_id):
         run_dir = self.root / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        for subdir in ["checkpoints", "gradients", "activations", "predictions", "slices"]:
+        for subdir in ["checkpoints", "gradients", "activations", "predictions", "probes", "slices"]:
             (run_dir / subdir).mkdir(exist_ok=True)
         return run_dir
 
@@ -191,6 +191,44 @@ class ArtifactStore:
             except Exception:
                 continue
         return predictions
+
+    def list_probe_steps(self, run_id):
+        probe_dir = self.root / "runs" / run_id / "probes"
+        if not probe_dir.exists():
+            return []
+        steps = []
+        for meta_path in sorted(probe_dir.glob("probe_step_*.json")):
+            try:
+                steps.append(int(meta_path.stem.split("_")[-1]))
+            except ValueError:
+                continue
+        return sorted(steps)
+
+    def load_probe_bundle(self, run_id, step=None):
+        probe_dir = self.root / "runs" / run_id / "probes"
+        if not probe_dir.exists():
+            raise FileNotFoundError(f"No probe directory found for run '{run_id}'")
+
+        if step is None:
+            steps = self.list_probe_steps(run_id)
+            if not steps:
+                raise FileNotFoundError(f"No probe bundles found for run '{run_id}'")
+            step = steps[-1]
+
+        meta_path = probe_dir / f"probe_step_{step}.json"
+        data_path = probe_dir / f"probe_step_{step}.npz"
+        if not meta_path.exists() or not data_path.exists():
+            raise FileNotFoundError(f"Probe bundle missing for run '{run_id}' at step {step}")
+
+        with open(meta_path) as f:
+            meta = json.load(f)
+
+        arrays = {}
+        with np.load(str(data_path), allow_pickle=False) as data:
+            for key in data.files:
+                arrays[key] = data[key]
+
+        return {"meta": meta, "arrays": arrays}
 
     def get_architecture(self, run_id):
         arch_path = self.root / "runs" / run_id / "model_structure.json"

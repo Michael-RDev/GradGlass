@@ -20,6 +20,7 @@ from gradglass.diff import full_diff, gradient_flow_analysis, prediction_diff, a
 from gradglass.evaluation import build_evaluation_payload
 from gradglass.experiment_tracking import build_overview_snapshot, normalize_run_status
 from gradglass.telemetry import collect_infrastructure_telemetry
+from gradglass.visualizations import build_distributions_payload, build_embeddings_payload, build_saliency_payload
 
 
 def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[list[dict[str, Any]]] = None):
@@ -157,6 +158,24 @@ def create_app(store):
     async def get_activations(run_id):
         stats = store.get_activation_stats(run_id)
         return {"run_id": run_id, "activations": stats}
+
+    @app.get("/api/runs/{run_id}/distributions")
+    async def get_distributions(run_id, step: Optional[int] = Query(None, description="Probe step to inspect")):
+        if not store.get_run_dir(run_id).exists():
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return build_distributions_payload(store, run_id, step=step)
+
+    @app.get("/api/runs/{run_id}/saliency")
+    async def get_saliency(run_id, step: Optional[int] = Query(None, description="Probe step to inspect")):
+        if not store.get_run_dir(run_id).exists():
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return build_saliency_payload(store, run_id, step=step)
+
+    @app.get("/api/runs/{run_id}/embeddings")
+    async def get_embeddings(run_id, step: Optional[int] = Query(None, description="Probe step to inspect")):
+        if not store.get_run_dir(run_id).exists():
+            raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+        return build_embeddings_payload(store, run_id, step=step)
 
     @app.get("/api/runs/{run_id}/predictions")
     async def get_predictions(run_id):
@@ -354,7 +373,8 @@ def create_app(store):
     @app.websocket("/api/runs/{run_id}/stream")
     async def stream_metrics(websocket: WebSocket, run_id: str):
         await websocket.accept()
-        last_step = 0
+        existing_metrics = store.get_metrics(run_id)
+        last_step = max((m.get("step", 0) for m in existing_metrics), default=0)
         try:
             while True:
                 metrics = store.get_metrics(run_id)
@@ -416,6 +436,9 @@ def create_app(store):
                             },
                         }
                     )
+                    break
+                if str((overview or {}).get("status") or "").strip().lower() in {"complete", "completed", "finished", "failed", "cancelled", "interrupted"}:
+                    break
                 await asyncio.sleep(1.0)
         except WebSocketDisconnect:
             pass

@@ -52,6 +52,18 @@ export async function fetchActivations(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/activations`);
 }
 
+export async function fetchDistributions(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/distributions`);
+}
+
+export async function fetchSaliency(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/saliency`);
+}
+
+export async function fetchEmbeddings(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/embeddings`);
+}
+
 export async function fetchPredictions(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/predictions`);
 }
