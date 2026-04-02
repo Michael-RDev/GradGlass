@@ -7,6 +7,7 @@ import threading
 import time
 import warnings
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
@@ -56,8 +57,16 @@ def _browser_command(url: str) -> list[str]:
     return [sys.executable, "-m", "webbrowser", url]
 
 
-def open_url_detached(url: str) -> bool:
-    command = _browser_command(url)
+def _with_reload_token(url: str) -> str:
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["_gg_reload"] = str(time.time_ns())
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def open_url_detached(url: str, *, force_reload: bool = False) -> bool:
+    target_url = _with_reload_token(url) if force_reload else url
+    command = _browser_command(target_url)
     kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -73,15 +82,15 @@ def open_url_detached(url: str) -> bool:
         subprocess.Popen(command, **kwargs)
         return True
     except Exception as exc:
-        warnings.warn(f"GradGlass could not open the browser automatically for {url}: {exc}", RuntimeWarning)
+        warnings.warn(f"GradGlass could not open the browser automatically for {target_url}: {exc}", RuntimeWarning)
         return False
 
 
-def schedule_url_open_detached(url: str, *, delay_s: float = 0.0) -> threading.Thread:
+def schedule_url_open_detached(url: str, *, delay_s: float = 0.0, force_reload: bool = False) -> threading.Thread:
     def _runner():
         if delay_s > 0:
             time.sleep(delay_s)
-        open_url_detached(url)
+        open_url_detached(url, force_reload=force_reload)
 
     thread = threading.Thread(target=_runner, daemon=True)
     thread.start()

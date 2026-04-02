@@ -1,5 +1,9 @@
 const API_BASE = '/api';
 
+function encodeRunId(runId) {
+  return encodeURIComponent(runId);
+}
+
 async function fetchJSON(url) {
   const res = await fetch(`${API_BASE}${url}`);
   if (!res.ok) {
@@ -13,23 +17,23 @@ export async function fetchRuns() {
 }
 
 export async function fetchRun(runId) {
-  return fetchJSON(`/runs/${runId}`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}`);
 }
 
 export async function fetchMetrics(runId) {
-  return fetchJSON(`/runs/${runId}/metrics`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/metrics`);
 }
 
 export async function fetchOverview(runId) {
-  return fetchJSON(`/runs/${runId}/overview`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/overview`);
 }
 
 export async function fetchCheckpoints(runId) {
-  return fetchJSON(`/runs/${runId}/checkpoints`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/checkpoints`);
 }
 
 export async function fetchAlerts(runId) {
-  return fetchJSON(`/runs/${runId}/alerts`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/alerts`);
 }
 
 export async function fetchCompare(runIds) {
@@ -37,43 +41,44 @@ export async function fetchCompare(runIds) {
 }
 
 export async function fetchDiff(runId, stepA, stepB, includeDeltas = false) {
-  return fetchJSON(`/runs/${runId}/diff?a=${stepA}&b=${stepB}&include_deltas=${includeDeltas}`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/diff?a=${stepA}&b=${stepB}&include_deltas=${includeDeltas}`);
 }
 
 export async function fetchGradients(runId) {
-  return fetchJSON(`/runs/${runId}/gradients`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/gradients`);
 }
 
 export async function fetchActivations(runId) {
-  return fetchJSON(`/runs/${runId}/activations`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/activations`);
 }
 
 export async function fetchPredictions(runId) {
-  return fetchJSON(`/runs/${runId}/predictions`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/predictions`);
 }
 
 export async function fetchArchitecture(runId) {
-  return fetchJSON(`/runs/${runId}/architecture`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/architecture`);
 }
 
 export async function fetchAnalysis(runId) {
-  return fetchJSON(`/runs/${runId}/analysis`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/analysis`);
 }
 
 export async function fetchLeakageReport(runId) {
-  return fetchJSON(`/runs/${runId}/leakage`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/leakage`);
 }
 
 export async function fetchEvalLab(runId) {
-  return fetchJSON(`/runs/${runId}/eval`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/eval`);
 }
 
 export async function fetchInfrastructureTelemetry(runId) {
-  return fetchJSON(`/runs/${runId}/infrastructure`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/infrastructure`);
 }
 
 export function createMetricsStream(runId, onMessage) {
-  const ws = new WebSocket(`ws://${window.location.host}/api/runs/${runId}/stream`);
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${protocol}://${window.location.host}/api/runs/${encodeRunId(runId)}/stream`);
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
     onMessage(data);
@@ -83,5 +88,5 @@ export function createMetricsStream(runId, onMessage) {
 }
 
 export async function fetchFreezeCode(runId) {
-  return fetchJSON(`/runs/${runId}/freeze_code`);
+  return fetchJSON(`/runs/${encodeRunId(runId)}/freeze_code`);
 }

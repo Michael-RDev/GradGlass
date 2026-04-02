@@ -352,7 +352,7 @@ def create_app(store):
         return {"run_id": run_id, "evaluations": report["evaluations"], "report": report}
 
     @app.websocket("/api/runs/{run_id}/stream")
-    async def stream_metrics(websocket, run_id):
+    async def stream_metrics(websocket: WebSocket, run_id: str):
         await websocket.accept()
         last_step = 0
         try:
@@ -520,6 +520,28 @@ def start_server(app, port=0):
 
 def start_server_blocking(app, port=8432, open_browser=True):
     if open_browser:
-        schedule_url_open_detached(f"http://localhost:{port}", delay_s=1.5)
+        schedule_url_open_detached(f"http://localhost:{port}", delay_s=1.5, force_reload=True)
     print(f"🔬 GradGlass server running at http://localhost:{port}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the GradGlass dashboard server.")
+    parser.add_argument("--root", default=None, help="Artifact store root. Defaults to ./gg_artifacts in the cwd.")
+    parser.add_argument("--port", type=int, default=8432, help="Port to bind the GradGlass dashboard server.")
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the dashboard URL in a browser after the server starts.",
+    )
+    args = parser.parse_args()
+
+    store = ArtifactStore(root=args.root)
+    app = create_app(store)
+    start_server_blocking(app, port=args.port, open_browser=args.open_browser)
+
+
+if __name__ == "__main__":
+    main()

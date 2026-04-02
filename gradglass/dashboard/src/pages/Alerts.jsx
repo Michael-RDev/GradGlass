@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import useRunStore from '../store/useRunStore';
 import { SeverityBadge, StatusBadge } from '../components/ui';
@@ -143,11 +143,7 @@ function getVerdict(summary, primaryAlert) {
 
 export default function Alerts() {
   const { runId } = useParams();
-  const { setActiveRun, alerts, alertsSummary, metadata, overview } = useRunStore();
-
-  useEffect(() => {
-    if (runId) setActiveRun(runId);
-  }, [runId, setActiveRun]);
+  const { alerts, alertsSummary, metadata, overview } = useRunStore();
 
   if (!metadata || !overview) {
     return <div className="p-8 text-slate-400">Loading alerts data...</div>;
@@ -212,7 +208,7 @@ export default function Alerts() {
           </div>
           {primaryAlert?.cta_path && (
             <Link
-              to={`/run/${runId}${primaryAlert.cta_path}`}
+              to={`/run/${encodeURIComponent(runId || '')}${primaryAlert.cta_path}`}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-700 bg-slate-950 text-sm text-slate-200 hover:border-slate-600 hover:bg-slate-800 transition-colors"
             >
               {CTA_LABELS[primaryAlert.cta_path] || 'Open Related View'}
@@ -347,7 +343,7 @@ export default function Alerts() {
                     )}
                     {alert.cta_path && (
                       <Link
-                        to={`/run/${runId}${alert.cta_path}`}
+                        to={`/run/${encodeURIComponent(runId || '')}${alert.cta_path}`}
                         className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-sm text-slate-200 hover:border-slate-600 hover:bg-slate-800 transition-colors"
                       >
                         {CTA_LABELS[alert.cta_path] || 'Open Related View'}

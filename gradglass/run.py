@@ -355,10 +355,47 @@ class Run:
     def _open_dashboard_browser(self, port: int, *, force: bool = False) -> bool:
         if self._browser_opened and not force:
             return False
-        opened = open_url_detached(self._dashboard_run_url(port))
+        opened = open_url_detached(self._dashboard_run_url(port), force_reload=True)
         if opened:
             self._browser_opened = True
         return opened
+
+    def _start_persistent_dashboard_server(self, port: int = 0) -> int:
+        import subprocess
+        import sys
+        from gradglass.server import _wait_for_server, find_free_port
+
+        if self.server_process is not None and self.server_process.poll() is None and self.server_port is not None:
+            return self.server_port
+
+        actual_port = port or find_free_port()
+        cmd = [
+            sys.executable,
+            "-m",
+            "gradglass.server",
+            "--root",
+            str(self.store.root),
+            "--port",
+            str(actual_port),
+        ]
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        if not _wait_for_server("127.0.0.1", actual_port, timeout=10.0):
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                process.kill()
+            raise RuntimeError(f"GradGlass dashboard server did not start on port {actual_port}")
+
+        self.server_process = process
+        self.server_port = actual_port
+        return actual_port
 
     def log(self, **metrics):
         self.step += 1
@@ -504,15 +541,12 @@ class Run:
         print(f"GradGlass dashboard: {url}")
         print("Press Ctrl+C to stop the server.")
         self._browser_opened = True
-        schedule_url_open_detached(url, delay_s=1.5)
+        schedule_url_open_detached(url, delay_s=1.5, force_reload=True)
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
     def serve(self, port=0, open_browser=True):
-        from gradglass.server import create_app, start_server
-
-        if self.server_process is None:
-            app = create_app(self.store)
-            actual_port = start_server(app, port=port)
+        if self.server_process is None or self.server_process.poll() is not None:
+            actual_port = self._start_persistent_dashboard_server(port=port)
             self.server_port = actual_port
         if open_browser:
             self._open_dashboard_browser(self.server_port)
@@ -521,15 +555,13 @@ class Run:
     def monitor(self, port=0, open_browser=True):
         """Launch the dashboard server before or during training for live monitoring.
 
-        This starts the server in a background thread and optionally opens the
-        browser.  The server stays alive until the process exits or ``finish()``
-        is called.
+        This starts the server in a detached process and optionally opens the
+        browser. The server remains available after training exits so users can
+        keep exploring completed runs.
 
         Returns the port the server is listening on.
         """
-        from gradglass.server import create_app, start_server
-
-        if self.server_port is not None:
+        if self.server_process is not None and self.server_process.poll() is None and self.server_port is not None:
             # Server already running
             if open_browser:
                 self._open_dashboard_browser(self.server_port)
@@ -538,8 +570,7 @@ class Run:
             )
             return self.server_port
 
-        app = create_app(self.store)
-        actual_port = start_server(app, port=port)
+        actual_port = self._start_persistent_dashboard_server(port=port)
         self.server_port = actual_port
         self._write_runtime_state(
             event="monitor_start", monitor_enabled=True, monitor_port=actual_port, current_step=self.step

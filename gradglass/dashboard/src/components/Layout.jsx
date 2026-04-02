@@ -3,17 +3,17 @@ import { Microscope, LayoutDashboard, Activity, BarChart2, Cpu, Database, GitCom
 import { useTheme } from './ThemeProvider';
 
 const MAIN_NAV = [
-  { label: 'Dashboard', runPath: '/overview', globalPath: '/dashboard' },
-  { label: 'Experiments', runPath: '/compare', globalPath: '/experiments' },
-  { label: 'Models', runPath: '/internals', globalPath: '/models' },
-  { label: 'Datasets', runPath: '/data', globalPath: '/datasets' },
+  { globalLabel: 'Dashboard', runLabel: 'Overview', runPath: '/overview', globalPath: '/dashboard' },
+  { globalLabel: 'Experiments', runLabel: 'Experiments', runPath: '/compare', globalPath: '/experiments' },
+  { globalLabel: 'Models', runLabel: 'Visualizations', runPath: '/internals', globalPath: '/models' },
+  { globalLabel: 'Datasets', runLabel: 'Datasets', runPath: '/data', globalPath: '/datasets' },
 ];
 
 const SIDEBAR_SECTIONS = [
   {
     title: 'Monitor',
     items: [
-      { path: '/overview', label: 'Dashboard', icon: LayoutDashboard },
+      { path: '/overview', label: 'Overview', icon: LayoutDashboard },
       { path: '/training', label: 'Metrics', icon: Activity },
       { path: '/infrastructure', label: 'Infrastructure', icon: Server },
     ]
@@ -63,13 +63,14 @@ export default function Layout({ children }) {
           <nav className="hidden md:flex items-center gap-1">
             {MAIN_NAV.map((nav) => {
               const target = runId ? `/run/${runId}${nav.runPath}` : nav.globalPath;
+              const label = runId ? nav.runLabel : nav.globalLabel;
               const isActive = runId
                 ? location.pathname.includes(nav.runPath)
                 : location.pathname === nav.globalPath;
 
               return (
                 <Link
-                  key={nav.label}
+                  key={nav.globalLabel}
                   to={target}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
@@ -77,7 +78,7 @@ export default function Layout({ children }) {
                       : 'text-theme-text-secondary hover:text-theme-text-primary hover:bg-theme-surface-hover'
                   }`}
                 >
-                  {nav.label}
+                  {label}
                 </Link>
               );
             })}
@@ -117,7 +118,7 @@ export default function Layout({ children }) {
               </div>
             ) : (
               <div className="mb-6 px-2">
-                 <p className="text-[12px] font-semibold text-theme-text-muted uppercase tracking-wider">Global Overview</p>
+                 <p className="text-[12px] font-semibold text-theme-text-muted uppercase tracking-wider">Global Dashboard</p>
               </div>
             )}
 

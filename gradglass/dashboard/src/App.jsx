@@ -1,6 +1,8 @@
-import { Routes, Route, Navigate, useParams } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import RunRouteController from './components/RunRouteController';
 import Home from './pages/Home';
+import Overview from './pages/Overview';
 import Training from './pages/Training';
 import Evaluation from './pages/Evaluation';
 import ModelInternals from './pages/ModelInternals';
@@ -9,11 +11,6 @@ import Compare from './pages/Compare';
 import Alerts from './pages/Alerts';
 import Infrastructure from './pages/Infrastructure';
 import Interpretability from './pages/Interpretability';
-
-function RunInternalsRedirect() {
-  const { runId } = useParams();
-  return <Navigate to={`/run/${encodeURIComponent(runId || '')}/overview`} replace />;
-}
 
 export default function App() {
   return (
@@ -24,16 +21,18 @@ export default function App() {
         <Route path="/experiments" element={<Home />} />
         <Route path="/models" element={<Home />} />
         <Route path="/datasets" element={<Home />} />
-        <Route path="/run/:runId" element={<Navigate to="overview" replace />} />
-        <Route path="/run/:runId/overview" element={<ModelInternals />} />
-        <Route path="/run/:runId/training" element={<Training />} />
-        <Route path="/run/:runId/evaluation" element={<Evaluation />} />
-        <Route path="/run/:runId/internals" element={<RunInternalsRedirect />} />
-        <Route path="/run/:runId/data" element={<Data />} />
-        <Route path="/run/:runId/infrastructure" element={<Infrastructure />} />
-        <Route path="/run/:runId/interpretability" element={<Interpretability />} />
-        <Route path="/run/:runId/compare" element={<Compare />} />
-        <Route path="/run/:runId/alerts" element={<Alerts />} />
+        <Route path="/run/:runId" element={<RunRouteController />}>
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<Overview />} />
+          <Route path="training" element={<Training />} />
+          <Route path="evaluation" element={<Evaluation />} />
+          <Route path="internals" element={<ModelInternals />} />
+          <Route path="data" element={<Data />} />
+          <Route path="infrastructure" element={<Infrastructure />} />
+          <Route path="interpretability" element={<Interpretability />} />
+          <Route path="compare" element={<Compare />} />
+          <Route path="alerts" element={<Alerts />} />
+        </Route>
       </Routes>
     </Layout>
   );

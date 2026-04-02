@@ -8,12 +8,8 @@ import { extractNumericSeries } from '../utils';
 
 export default function Training() {
   const { runId } = useParams();
-  const { setActiveRun, metrics, discoverMetricKeys } = useRunStore();
+  const { metrics, discoverMetricKeys } = useRunStore();
   const { theme } = useTheme();
-
-  useEffect(() => {
-    if (runId) setActiveRun(runId);
-  }, [runId, setActiveRun]);
 
   const availableMetrics = useMemo(() => {
     return discoverMetricKeys();

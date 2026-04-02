@@ -13,7 +13,7 @@ import ReactFlow, {
 } from 'reactflow'
 import dagre from '@dagrejs/dagre'
 import 'reactflow/dist/style.css'
-import { fetchArchitecture } from '../api'
+import { fetchArchitecture, fetchGradients } from '../api'
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/ui'
 import { Network, Search, Edit3, Save, ChevronDown, ChevronRight } from 'lucide-react'
 
@@ -259,6 +259,54 @@ function shortName(id) {
   return parts[parts.length - 1]
 }
 
+function normalizeGradientLayerId(layerId) {
+  if (!layerId) return layerId
+  const normalized = layerId.replace(/\.(weight|bias|running_mean|running_var|num_batches_tracked|gamma|beta)$/i, '')
+  return normalized || layerId
+}
+
+function buildFallbackArchitecture(gradients) {
+  const summaries = gradients?.summaries || []
+  if (!summaries.length) return null
+
+  const latestLayers = summaries[summaries.length - 1]?.layers || {}
+  const orderedIds = []
+  const seen = new Set()
+
+  for (const rawId of Object.keys(latestLayers)) {
+    const normalizedId = normalizeGradientLayerId(rawId)
+    if (!normalizedId || seen.has(normalizedId)) continue
+    seen.add(normalizedId)
+    orderedIds.push(normalizedId)
+  }
+
+  if (!orderedIds.length) return null
+
+  return {
+    root_type: 'Observed Training Graph',
+    top_level: orderedIds,
+    layers: orderedIds.map((id) => ({
+      id,
+      type: 'ObservedModule',
+      params: {},
+      param_count: 0,
+      trainable: true,
+      input_shape: null,
+      output_shape: null,
+      depth: 1,
+      parent: '__root__',
+      children: [],
+      is_container: false,
+      category: 'model',
+    })),
+    edges: orderedIds.slice(0, -1).map((id, index) => [id, orderedIds[index + 1]]),
+  }
+}
+
+function isNotFoundError(message) {
+  return typeof message === 'string' && (message.includes('404') || message.includes('No architecture data found'))
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Build ReactFlow nodes + edges from backend data
 // ─────────────────────────────────────────────────────────────────
@@ -458,6 +506,7 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
   const [architecture, setArchitecture] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [isFallbackArchitecture, setIsFallbackArchitecture] = useState(false)
   const [collapsed, setCollapsed] = useState({})
   const [selectedNode, setSelectedNode] = useState(null)
 
@@ -483,9 +532,48 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
   }, [architecture, collapsed, onToggle, setNodes, setEdges])
 
   useEffect(() => {
-    fetchArchitecture(runId)
-      .then(data => { setArchitecture(data); setLoading(false) })
-      .catch(err => { setError(err.message); setLoading(false) })
+    let cancelled = false
+
+    setLoading(true)
+    setError(null)
+    setArchitecture(null)
+    setIsFallbackArchitecture(false)
+
+    Promise.allSettled([fetchArchitecture(runId), fetchGradients(runId)])
+      .then(([architectureResult, gradientsResult]) => {
+        if (cancelled) return
+
+        const architectureData = architectureResult.status === 'fulfilled' ? architectureResult.value : null
+        if (architectureData?.layers?.length) {
+          setArchitecture(architectureData)
+          return
+        }
+
+        const gradientsData = gradientsResult.status === 'fulfilled' ? gradientsResult.value : null
+        const fallbackArchitecture = buildFallbackArchitecture(gradientsData)
+        if (fallbackArchitecture?.layers?.length) {
+          setArchitecture(fallbackArchitecture)
+          setIsFallbackArchitecture(true)
+          return
+        }
+
+        const architectureError = architectureResult.status === 'rejected' ? architectureResult.reason?.message : null
+        const gradientsError = gradientsResult.status === 'rejected' ? gradientsResult.reason?.message : null
+        const shouldShowError = [architectureError, gradientsError].some((message) => message && !isNotFoundError(message))
+
+        if (shouldShowError) {
+          setError(architectureError || gradientsError || 'Failed to load architecture data')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [runId])
 
   const onConnect = useCallback(
@@ -516,7 +604,7 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
       <EmptyState
         icon={Network}
         title="No architecture data"
-        description="Architecture is captured when you call run.watch(model)."
+        description="Architecture is captured when you call run.watch(model). If only gradient summaries are available, GradGlass will try to build a fallback DAG automatically."
       />
     )
   }
@@ -574,6 +662,11 @@ export default function ArchitectureGraph({ hideHeader, onNodeSelect, heightClas
           <div className="w-8 h-px border-t-2 border-indigo-500" style={{ borderStyle: 'dashed' }} />
           <span className="text-[10px] text-slate-400">animated = data flow</span>
         </div>
+        {isFallbackArchitecture && (
+          <div className="ml-auto rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] text-amber-300">
+            Fallback DAG from gradient summaries
+          </div>
+        )}
       </div>
 
       <div className="flex-1 flex gap-6 min-h-0">

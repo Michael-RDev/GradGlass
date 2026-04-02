@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import React from 'react';
 import useRunStore from '../store/useRunStore';
 import { useTheme } from '../components/ThemeProvider';
 import { StatusBadge } from '../components/ui';
@@ -76,8 +75,6 @@ const VAL_FALLBACK_PRIORITY = [
   'score',
 ];
 
-const OVERVIEW_ALERTS_HIDDEN_KEY = 'gradglass:overview:alertsHidden';
-
 function formatDuration(seconds) {
   if (seconds == null || Number.isNaN(seconds)) return '-';
   const s = Math.max(0, Math.floor(seconds));
@@ -95,64 +92,9 @@ function formatFloat(value, digits = 4) {
   return Number(value).toFixed(digits);
 }
 
-function normalizeAlertSeverity(severity) {
-  return (severity || 'LOW').toString().trim().toUpperCase();
-}
-
-function getAlertStyles(severity) {
-  const level = normalizeAlertSeverity(severity);
-  if (level === 'CRITICAL' || level === 'HIGH') {
-    return {
-      card: 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20',
-      icon: 'text-red-600 dark:text-red-500',
-      title: 'text-red-700 dark:text-red-400',
-      body: 'text-red-600 dark:text-red-400/80',
-    };
-  }
-  if (level === 'MEDIUM') {
-    return {
-      card: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20',
-      icon: 'text-amber-600 dark:text-amber-500',
-      title: 'text-amber-700 dark:text-amber-500',
-      body: 'text-amber-600 dark:text-amber-500/80',
-    };
-  }
-  return {
-    card: 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20',
-    icon: 'text-blue-600 dark:text-blue-400',
-    title: 'text-blue-700 dark:text-blue-400',
-    body: 'text-blue-600 dark:text-blue-400/80',
-  };
-}
-
-function loadAlertsHiddenPreference() {
-  if (typeof window === 'undefined') return false;
-  try {
-    return localStorage.getItem(OVERVIEW_ALERTS_HIDDEN_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
 export default function Overview() {
-  const { runId } = useParams();
-  const { setActiveRun, metadata, metrics, alerts, overview } = useRunStore();
+  const { metadata, metrics, overview } = useRunStore();
   const { theme } = useTheme();
-  const [alertsHidden, setAlertsHidden] = useState(loadAlertsHiddenPreference);
-
-  useEffect(() => {
-    if (runId) {
-      setActiveRun(runId);
-    }
-  }, [runId, setActiveRun]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(OVERVIEW_ALERTS_HIDDEN_KEY, String(alertsHidden));
-    } catch {
-      // Ignore storage errors so the dashboard still renders normally.
-    }
-  }, [alertsHidden]);
 
   const textColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : '#37415C';
   const gridColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
@@ -351,7 +293,6 @@ export default function Overview() {
   const healthState = overview?.health_state || 'WARNING';
   const style = HEALTH_STYLES[healthState] || HEALTH_STYLES.WARNING;
   const StatusIcon = style.icon;
-  const hasAlerts = alerts && alerts.length > 0;
 
   const currentStep = overview?.current_step ?? (metrics.length > 0 ? Math.max(...metrics.map((m) => m.step || 0)) : 0);
   const elapsedTime = overview?.elapsed_time_s ?? (metadata.start_time_epoch ? Date.now() / 1000 - metadata.start_time_epoch : null);
@@ -364,80 +305,20 @@ export default function Overview() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="h2 text-theme-text-primary">Global Experiment Overview</h1>
-          <StatusBadge status={resolvedStatus} />
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="h2 text-theme-text-primary">Run Overview</h1>
+            <StatusBadge status={resolvedStatus} />
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Live metrics and run health stay here. Use Visualizations for the DAG and deeper model views.
+          </p>
         </div>
         <div className={`flex items-center gap-2 px-4 py-2 rounded-full border bg-white dark:bg-slate-900 shadow-sm ${style.border}`}>
           <StatusIcon className={`w-5 h-5 ${style.text}`} />
           <span className={`text-sm font-bold tracking-wide ${style.text}`}>SYSTEM: {healthState}</span>
         </div>
       </div>
-
-      {hasAlerts && (
-        alertsHidden ? (
-          <div className="card flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-900 dark:text-white">
-                  {alerts.length} alert{alerts.length === 1 ? '' : 's'} hidden
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Overview alerts are collapsed, but the alert feed is still active.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAlertsHidden(false)}
-              aria-expanded="false"
-              className="shrink-0 text-xs px-3 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              Show Alerts
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Alerts
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                  {alerts.length}
-                </span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setAlertsHidden(true)}
-                aria-expanded="true"
-                className="text-xs px-3 py-1 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                Hide Alerts
-              </button>
-            </div>
-
-            {alerts.map((a, i) => {
-              const styles = getAlertStyles(a.severity);
-              return (
-                <div key={i} className={`p-4 rounded-lg flex items-start gap-3 border ${styles.card}`}>
-                  <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${styles.icon}`} />
-                  <div>
-                    <h4 className={`font-semibold text-sm ${styles.title}`}>
-                      {a.title}
-                    </h4>
-                    <p className={`text-sm mt-1 ${styles.body}`}>
-                      {a.message || a.recommendation}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )
-      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="card flex flex-col justify-between">
