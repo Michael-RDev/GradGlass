@@ -197,7 +197,8 @@ def inspect_sample(
         metrics["image_height"] = height
         metrics["image_width"] = width
         metrics["aspect_ratio"] = round(float(width / max(height, 1)), 4) if width and height else None
-        feature_names, feature_vector = _flatten_numeric_features(np.asarray([height, width], dtype=np.float32))
+        feature_names = ["image_height", "image_width"]
+        feature_vector = np.asarray([height, width], dtype=np.float32)
         approx = build_image_signature(arr, dims=signature_dims)
     elif modality == ModalityType.AUDIO:
         arr = np.asarray(sample)

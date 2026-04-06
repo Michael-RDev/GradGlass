@@ -22,6 +22,7 @@ import {
   fetchGradients,
   fetchSaliency,
 } from '../api';
+import { buildStructuredSaliencyOption, HeatmapGrid } from '../components/SaliencyShared';
 import { useTheme } from '../components/ThemeProvider';
 import useRunStore from '../store/useRunStore';
 import ArchitectureGraph from './ArchitectureGraph';
@@ -105,32 +106,6 @@ function buildHistogramOption(entry, textColor, gridColor) {
   };
 }
 
-function buildStructuredSaliencyOption(featureImportance, textColor, gridColor) {
-  const topFeatures = [...(featureImportance || [])].slice(0, 12).reverse();
-  return {
-    animation: false,
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 120, right: 24, top: 20, bottom: 24 },
-    xAxis: {
-      type: 'value',
-      axisLabel: { color: textColor },
-      splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
-    },
-    yAxis: {
-      type: 'category',
-      data: topFeatures.map((feature) => feature.feature),
-      axisLabel: { color: textColor, fontSize: 11 },
-    },
-    series: [
-      {
-        type: 'bar',
-        data: topFeatures.map((feature) => feature.score),
-        itemStyle: { color: '#ec4899', borderRadius: [0, 4, 4, 0] },
-      },
-    ],
-  };
-}
-
 function colorForLabel(label, fallbackIndex = 0) {
   if (label == null) return '#94a3b8';
   const value = Number.isFinite(Number(label)) ? Number(label) : fallbackIndex;
@@ -200,32 +175,6 @@ function buildEmbeddingOption(layer, payload, colorMode, textColor, gridColor) {
       },
     ],
   };
-}
-
-function HeatmapGrid({ values, tone = 'input' }) {
-  const rows = Array.isArray(values) ? values : [];
-  const cols = rows[0]?.length || 0;
-  const baseColor =
-    tone === 'saliency'
-      ? (value) => `rgba(244, 63, 94, ${Math.min(1, Math.max(0.08, value))})`
-      : (value) => `rgba(148, 163, 184, ${Math.min(1, Math.max(0.06, value))})`;
-
-  return (
-    <div
-      className="grid aspect-square w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-950/70 dark:border-slate-800"
-      style={{ gridTemplateColumns: `repeat(${cols || 1}, minmax(0, 1fr))` }}
-    >
-      {rows.flatMap((row, rowIndex) =>
-        row.map((value, colIndex) => (
-          <div
-            key={`${rowIndex}-${colIndex}`}
-            style={{ background: baseColor(Number(value) || 0) }}
-            className="aspect-square"
-          />
-        ))
-      )}
-    </div>
-  );
 }
 
 function CopyButton({ label, text, activeCopyId, setActiveCopyId, copyId }) {

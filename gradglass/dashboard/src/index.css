@@ -81,7 +81,7 @@
     @apply bg-theme-secondary-hover;
   }
 
-  /* Cards */
+  /* Cards & Glassmorphism */
   .card {
     @apply relative overflow-hidden transition-all duration-500 ease-out border border-theme-border/50 bg-theme-surface/70 backdrop-blur-xl p-6;
     border-radius: 28px;
@@ -89,6 +89,20 @@
   }
   .card:hover {
     @apply -translate-y-1 shadow-lg border-theme-primary/30;
+  }
+
+  .glass-panel {
+    @apply rounded-[32px] border border-theme-border/60 bg-theme-surface/60 backdrop-blur-2xl p-8 shadow-xl transition-all duration-500;
+  }
+  .glass-panel:hover {
+    @apply border-theme-primary/30 shadow-2xl;
+  }
+
+  .glass-card {
+    @apply rounded-2xl border border-theme-border/50 bg-theme-surface/40 backdrop-blur-xl p-5 shadow-sm transition-all duration-300;
+  }
+  .glass-card:hover {
+    @apply -translate-y-1 border-theme-primary/40 shadow-md bg-theme-surface/60;
   }
 
   /* Specific states */

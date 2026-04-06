@@ -82,27 +82,62 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
+function summarizeStageCoverage(snapshots, stage) {
+  const matching = (snapshots || []).filter((snapshot) => snapshot.stage === stage);
+  if (!matching.length) {
+    return {
+      sampleCount: null,
+      observedCount: null,
+      coverage: null,
+      splits: [],
+    };
+  }
+  const sampleCount = matching.reduce((sum, snapshot) => sum + (snapshot.sample_count || 0), 0);
+  const observedCount = matching.reduce((sum, snapshot) => sum + (snapshot.observed_sample_count || 0), 0);
+  return {
+    sampleCount: sampleCount || null,
+    observedCount: observedCount || 0,
+    coverage: sampleCount > 0 ? observedCount / sampleCount : null,
+    splits: [...new Set(matching.map((snapshot) => snapshot.split))].sort(),
+  };
+}
+
 function StageGrid({ stageCards, snapshots }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {stageCards.map((card) => (
-          <div key={card.stage} className="rounded-2xl border border-theme-border/50 bg-theme-surface/70 backdrop-blur-md p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-theme-primary/40">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-base font-bold text-theme-text-primary">{card.title}</p>
-                <p className="mt-1 text-sm font-medium text-theme-text-muted">{card.splits.length ? card.splits.join(', ') : 'No recorded splits'}</p>
+        {stageCards.map((card) => {
+          const coverage = summarizeStageCoverage(snapshots, card.stage);
+          const displaySampleCount = coverage.sampleCount ?? card.sample_count;
+          const displaySplits = coverage.splits.length ? coverage.splits : card.splits;
+          const observedSummary =
+            coverage.observedCount == null
+              ? null
+              : coverage.coverage == null || coverage.coverage >= 0.9999
+              ? `Analyzed ${formatValue(coverage.observedCount)} observed samples.`
+              : `Analyzed ${formatValue(coverage.observedCount)} of ${formatValue(displaySampleCount)} samples (${(coverage.coverage * 100).toFixed(1)}% coverage).`;
+
+          return (
+            <div key={card.stage} className="rounded-2xl border border-theme-border/50 bg-theme-surface/70 backdrop-blur-md p-6 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1 hover:border-theme-primary/40">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base font-bold text-theme-text-primary">{card.title}</p>
+                  <p className="mt-1 text-sm font-medium text-theme-text-muted">{displaySplits.length ? displaySplits.join(', ') : 'No recorded splits'}</p>
+                </div>
+                <span className={`badge shadow-sm px-2.5 py-0.5 ${STATUS_STYLES[card.status] || STATUS_STYLES.unknown}`}>
+                  {card.status}
+                </span>
               </div>
-              <span className={`badge shadow-sm px-2.5 py-0.5 ${STATUS_STYLES[card.status] || STATUS_STYLES.unknown}`}>
-                {card.status}
-              </span>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <MetricPill label="Samples" value={formatValue(displaySampleCount)} />
+                <MetricPill label="Splits" value={displaySplits.length || '-'} />
+              </div>
+              {observedSummary && (
+                <p className="mt-4 text-xs leading-relaxed text-theme-text-muted">{observedSummary}</p>
+              )}
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <MetricPill label="Samples" value={formatValue(card.sample_count)} />
-              <MetricPill label="Splits" value={card.splits.length || '-'} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="rounded-2xl border border-theme-border bg-theme-surface p-5 shadow-sm">
@@ -112,7 +147,9 @@ function StageGrid({ stageCards, snapshots }) {
               <tr>
                 <th className="pb-3 pr-4">Stage</th>
                 <th className="pb-3 pr-4">Split</th>
-                <th className="pb-3 pr-4">Samples</th>
+                <th className="pb-3 pr-4">Total Samples</th>
+                <th className="pb-3 pr-4">Observed</th>
+                <th className="pb-3 pr-4">Coverage</th>
                 <th className="pb-3 pr-4">Dropped</th>
                 <th className="pb-3 pr-4">Added</th>
                 <th className="pb-3 pr-4">Missing</th>
@@ -127,6 +164,8 @@ function StageGrid({ stageCards, snapshots }) {
                   <td className="py-3 pr-4 font-medium text-theme-text-primary">{snapshot.stage_label}</td>
                   <td className="py-3 pr-4">{snapshot.split}</td>
                   <td className="py-3 pr-4">{formatValue(snapshot.sample_count)}</td>
+                  <td className="py-3 pr-4">{formatValue(snapshot.observed_sample_count)}</td>
+                  <td className="py-3 pr-4">{snapshot.sample_coverage == null ? '-' : `${(snapshot.sample_coverage * 100).toFixed(1)}%`}</td>
                   <td className="py-3 pr-4">{formatValue(snapshot.dropped_samples)}</td>
                   <td className="py-3 pr-4">{formatValue(snapshot.added_samples)}</td>
                   <td className="py-3 pr-4">
@@ -384,9 +423,9 @@ function RecommendationsSection({ recommendations }) {
   );
 }
 
-function PanelShell({ id, title, icon: Icon, collapsed, onToggle, children }) {
+function PanelShell({ id, title, icon: Icon, collapsed, onToggle, explanation, children }) {
   return (
-    <section className="rounded-[32px] border border-theme-border/50 bg-theme-surface/60 backdrop-blur-xl p-8 shadow-md hover:shadow-xl hover:border-theme-primary/30 transition-all duration-500">
+    <section className="glass-panel">
       <button className="group flex w-full items-center justify-between gap-4 text-left outline-none" onClick={onToggle}>
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-theme-primary/10 text-theme-primary transition-transform group-hover:scale-105">
@@ -400,7 +439,17 @@ function PanelShell({ id, title, icon: Icon, collapsed, onToggle, children }) {
           {collapsed ? <ChevronRight className="h-5 w-5 text-theme-text-muted group-hover:text-theme-primary" /> : <ChevronDown className="h-5 w-5 text-theme-text-muted group-hover:text-theme-primary" />}
         </div>
       </button>
-      {!collapsed && <div className="mt-8">{children}</div>}
+      {!collapsed && (
+        <div className="mt-8">
+          {explanation && (
+            <div className="rounded-2xl border border-theme-primary/30 bg-theme-primary/5 p-5 mb-6">
+              <h3 className="text-sm font-bold text-theme-primary mb-2">🎓 What to look for: {title}</h3>
+              <p className="text-sm text-theme-text-secondary w-full max-w-4xl">{explanation}</p>
+            </div>
+          )}
+          {children}
+        </div>
+      )}
     </section>
   );
 }
@@ -500,13 +549,21 @@ export default function Data({ routeMode = 'data' }) {
     );
   }
 
+  const explanations = {
+    pipeline: 'Look closely at Stage Coverage. Dropped samples or low coverage might indicate data parsing errors before training even begins. Make sure no unexpected skips happen in your dataset loaders.',
+    composition: 'Check the class distributions. A heavily imbalanced dataset will cause your model to ignore minority classes. Ensure histograms match your expectations for realistic data.',
+    'split-comparisons': 'Watch out for distribution drift between train and validation splits. If val split is significantly different from train, your metrics will misrepresent real model capability.',
+    leakage: 'Leakage occurs when target information sneaks into training inputs. If a check fails here, your model is likely memorizing instead of learning.',
+    recommendations: 'Follow these prioritized action items to resolve critical pipeline errors and performance degradation.'
+  };
+
   return (
     <div className="space-y-8">
-      <div className="rounded-[32px] border border-theme-border/60 bg-theme-surface/80 backdrop-blur-2xl p-8 shadow-md hover:shadow-lg transition-shadow">
+      <div className="glass-panel">
         <div className="flex flex-col gap-8 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-4">
-              <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">
+              <h1 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">
                 Dataset & Pipeline Monitor
               </h1>
               <span className={`badge px-3 py-1 font-bold uppercase tracking-wider backdrop-blur-md shadow-sm ${STATUS_STYLES[headerStatus] || STATUS_STYLES.unknown}`}>
@@ -516,8 +573,8 @@ export default function Data({ routeMode = 'data' }) {
                 <span className="badge border-theme-primary/40 bg-theme-primary/10 text-theme-primary px-3 py-1 font-bold uppercase tracking-wider backdrop-blur-md shadow-sm">Leakage focus</span>
               )}
             </div>
-            <p className="mt-4 max-w-2xl text-base leading-relaxed text-theme-text-secondary">
-              Extensible dataset observability across raw data, transformed stages, splits, tokenization, loaders, and leakage diagnostics.
+            <p className="mt-6 max-w-2xl text-base leading-relaxed text-theme-text-secondary">
+              Extensible dataset observability across raw data, transformed stages, splits, tokenization, loaders, and leakage diagnostics. Monitor your data health right alongside training metrics.
             </p>
             <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
               <MetricPill label="Task" value={report.metadata?.task || '-'} />
@@ -553,33 +610,33 @@ export default function Data({ routeMode = 'data' }) {
         </div>
 
         {customizeOpen && (
-          <div className="mt-6 rounded-2xl border border-theme-border bg-theme-bg/60 p-4">
+          <div className="mt-6 glass-card">
             <div className="mb-4 flex items-center gap-2">
               <Filter className="h-4 w-4 text-theme-primary" />
               <p className="text-sm font-semibold text-theme-text-primary">Panel Layout</p>
             </div>
             <div className="space-y-3">
               {preferences.panelOrder.map((panelId) => (
-                <div key={panelId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-theme-border bg-theme-surface px-3 py-3">
+                <div key={panelId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-theme-border bg-theme-surface px-3 py-3 hover:border-theme-primary/30 transition-colors">
                   <div>
                     <p className="text-sm font-medium text-theme-text-primary">{PANEL_LABELS[panelId]}</p>
                     <p className="text-xs text-theme-text-muted">Persisted locally for this browser.</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg"
+                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg transition-colors"
                       onClick={() => setPreferences((prev) => ({ ...prev, panelOrder: movePanel(prev.panelOrder, panelId, 'up') }))}
                     >
                       <ArrowUp className="h-4 w-4" />
                     </button>
                     <button
-                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg"
+                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg transition-colors"
                       onClick={() => setPreferences((prev) => ({ ...prev, panelOrder: movePanel(prev.panelOrder, panelId, 'down') }))}
                     >
                       <ArrowDown className="h-4 w-4" />
                     </button>
                     <button
-                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg"
+                      className="rounded-lg border border-theme-border p-2 text-theme-text-secondary hover:bg-theme-bg transition-colors"
                       onClick={() => setPreferences((prev) => ({
                         ...prev,
                         panelVisibility: {
@@ -604,6 +661,7 @@ export default function Data({ routeMode = 'data' }) {
           id={panelId}
           title={PANEL_LABELS[panelId]}
           icon={panelIcons[panelId]}
+          explanation={explanations[panelId]}
           collapsed={preferences.collapsedSections[panelId]}
           onToggle={() => setPreferences((prev) => ({
             ...prev,

@@ -32,6 +32,12 @@ def _coerce_bool_option(value: Any, *, default: bool = False) -> bool:
     return bool(value)
 
 
+def _json_safe_scalar(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
 class Run:
     def __init__(self, name, store, auto_open=False, **options):
         self.name = name
@@ -428,6 +434,131 @@ class Run:
         if hasattr(self, "engine"):
             self.engine.log_batch_predictions(step=self.step, x=x, y=y, y_pred=y_pred, loss=loss)
         self._write_runtime_state(event="log_batch", current_step=self.step)
+
+    @staticmethod
+    def _coerce_array_like(value: Any) -> np.ndarray:
+        if isinstance(value, np.ndarray):
+            return value
+        if hasattr(value, "detach"):
+            value = value.detach().cpu().numpy()
+        elif hasattr(value, "cpu") and hasattr(value, "numpy"):
+            value = value.cpu().numpy()
+        elif hasattr(value, "numpy") and callable(getattr(value, "numpy")):
+            value = value.numpy()
+        return np.asarray(value)
+
+    @staticmethod
+    def _infer_feature_axis(shape: tuple[int, ...], feature_count: int) -> int:
+        if not shape:
+            if feature_count != 1:
+                raise ValueError("Scalar SHAP values require exactly one feature name.")
+            return 0
+        if len(shape) == 1:
+            if shape[0] != feature_count:
+                raise ValueError(
+                    f"Feature count mismatch: received {feature_count} feature names for SHAP values shaped {shape}."
+                )
+            return 0
+
+        candidates = [idx for idx, size in enumerate(shape) if size == feature_count]
+        if not candidates:
+            raise ValueError(
+                f"Could not match {feature_count} feature names to any SHAP axis in values shaped {shape}."
+            )
+        if 1 in candidates:
+            return 1
+        if (len(shape) - 1) in candidates:
+            return len(shape) - 1
+        return candidates[0]
+
+    @classmethod
+    def _compute_mean_abs_feature_scores(cls, feature_count: int, values: Any) -> np.ndarray:
+        if hasattr(values, "values"):
+            values = values.values
+
+        if isinstance(values, (list, tuple)):
+            if not values:
+                raise ValueError("SHAP values must not be empty.")
+            reduced = [cls._compute_mean_abs_feature_scores(feature_count, item) for item in values]
+            return np.mean(np.stack(reduced, axis=0), axis=0)
+
+        arr = cls._coerce_array_like(values).astype(np.float64, copy=False)
+        if arr.ndim == 0:
+            if feature_count != 1:
+                raise ValueError("Scalar SHAP values require exactly one feature name.")
+            return np.abs(arr).reshape(1)
+
+        feature_axis = cls._infer_feature_axis(tuple(int(size) for size in arr.shape), feature_count)
+        moved = np.moveaxis(np.abs(arr), feature_axis, -1)
+        if moved.ndim == 1:
+            return moved
+        flat = moved.reshape(-1, moved.shape[-1])
+        return np.mean(flat, axis=0)
+
+    def log_shap(self, feature_names, shap_values, *, message=None, top_k=20):
+        feature_names = [str(name) for name in feature_names]
+        if not feature_names:
+            raise ValueError("feature_names must contain at least one feature.")
+        top_k = int(top_k)
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than 0.")
+
+        mean_scores = self._compute_mean_abs_feature_scores(len(feature_names), shap_values)
+        if mean_scores.shape[0] != len(feature_names):
+            raise ValueError(
+                f"Feature count mismatch after SHAP aggregation: got {mean_scores.shape[0]} scores for {len(feature_names)} names."
+            )
+
+        ranked = sorted(
+            (
+                {"feature": feature, "mean_shap": round(float(score), 6)}
+                for feature, score in zip(feature_names, mean_scores)
+            ),
+            key=lambda item: item["mean_shap"],
+            reverse=True,
+        )
+        payload = {
+            "message": message or "Aggregated SHAP values across probes.",
+            "summary_plot": ranked[:top_k],
+            "feature_count": len(feature_names),
+            "top_k": min(top_k, len(feature_names)),
+        }
+        return self.store.save_shap(self.run_id, payload)
+
+    def log_lime(self, samples, *, message=None):
+        normalized_samples = []
+        for index, sample in enumerate(list(samples)):
+            if not isinstance(sample, dict):
+                raise ValueError("Each LIME sample must be a mapping.")
+
+            normalized = dict(sample)
+            normalized.setdefault("index", index)
+            if "probability" in normalized and normalized["probability"] is not None:
+                normalized["probability"] = float(normalized["probability"])
+
+            explanation_items = []
+            for item_index, item in enumerate(normalized.get("explanation") or []):
+                if not isinstance(item, dict):
+                    raise ValueError("Each LIME explanation entry must be a mapping.")
+                explanation_items.append(
+                    {
+                        "feature": str(item.get("feature", f"feature_{item_index}")),
+                        "weight": float(item.get("weight", 0.0)),
+                    }
+                )
+            normalized["explanation"] = explanation_items
+
+            for key in ("index", "prediction"):
+                if key in normalized:
+                    normalized[key] = _json_safe_scalar(normalized[key])
+            normalized_samples.append(normalized)
+
+        payload = {
+            "message": message or "Sample-level local explanations.",
+            "samples": normalized_samples,
+            "sample_count": len(normalized_samples),
+        }
+        return self.store.save_lime(self.run_id, payload)
 
     def checkpoint(self, step=None, tag=None):
         step = step or self.step

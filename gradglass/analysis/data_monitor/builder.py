@@ -136,7 +136,15 @@ class DatasetMonitorBuilder:
                         }
                     )
 
+            source_sample_count = capture.metadata.get("source_sample_count")
+            try:
+                source_sample_count = int(source_sample_count) if source_sample_count is not None else None
+            except (TypeError, ValueError):
+                source_sample_count = None
+
             total_count = adapted.total_count if adapted.total_count is not None else len(observations)
+            if source_sample_count is not None:
+                total_count = max(total_count, source_sample_count, len(observations))
             modality_total = max(sum(modality_counts.values()), 1)
             snapshot = PipelineStageSnapshot(
                 stage=capture.stage,
@@ -161,6 +169,7 @@ class DatasetMonitorBuilder:
                 metrics={
                     "adapter_source_type": adapted.source_type,
                     "adapter_errors": adapted.errors,
+                    "source_sample_count": source_sample_count,
                 },
                 notes=[f"Observed {len(observations)} samples from {adapted.source_type}."],
             )
@@ -260,6 +269,38 @@ class DatasetMonitorBuilder:
                         split=split,
                         category="composition",
                         data=slice_model.sequence_length_distribution,
+                    )
+                )
+            if slice_model.image_size_distribution.get("available"):
+                composition_panels.append(
+                    DashboardPanel(
+                        id=f"image-height-{split}",
+                        type="histogram",
+                        title=f"{split.title()} Image Heights",
+                        split=split,
+                        category="composition",
+                        data=slice_model.image_size_distribution.get("heights", {}),
+                    )
+                )
+                composition_panels.append(
+                    DashboardPanel(
+                        id=f"image-width-{split}",
+                        type="histogram",
+                        title=f"{split.title()} Image Widths",
+                        split=split,
+                        category="composition",
+                        data=slice_model.image_size_distribution.get("widths", {}),
+                    )
+                )
+            if slice_model.image_aspect_ratio_distribution.get("available"):
+                composition_panels.append(
+                    DashboardPanel(
+                        id=f"image-aspect-{split}",
+                        type="histogram",
+                        title=f"{split.title()} Image Aspect Ratios",
+                        split=split,
+                        category="composition",
+                        data=slice_model.image_aspect_ratio_distribution,
                     )
                 )
             if slice_model.outlier_features:

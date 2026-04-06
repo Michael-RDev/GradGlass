@@ -1,28 +1,120 @@
 from __future__ import annotations
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
 import numpy as np
 
 
-class ArtifactStore:
-    DEFAULT_ROOT = Path.cwd() / "gg_artifacts"
+def _artifact_json_default(value: Any):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
+
+DEFAULT_WORKSPACE_DIRNAME = "gg_workspace"
+_CLI_LAUNCHER_NAMES = {
+    "gradglass",
+    "gradglass.exe",
+    "pytest",
+    "pytest.exe",
+    "py.test",
+    "py.test.exe",
+    "python",
+    "python.exe",
+    "python3",
+    "python3.exe",
+    "ipython",
+    "ipython.exe",
+    "jupyter",
+    "jupyter.exe",
+}
+
+
+def _normalize_entrypoint_path(entrypoint: os.PathLike[str] | str | None) -> Optional[Path]:
+    if not entrypoint:
+        return None
+    raw = str(entrypoint).strip()
+    if not raw or raw.startswith("<") or raw in {"-c", "-m"}:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.resolve()
+
+
+def _is_gradglass_internal_entrypoint(path: Path) -> bool:
+    package_dir = Path(__file__).resolve().parent
+    return path == package_dir or package_dir in path.parents
+
+
+def _is_cli_launcher_path(path: Path) -> bool:
+    return path.name.lower() in _CLI_LAUNCHER_NAMES and path.parent.name.lower() in {"bin", "scripts"}
+
+
+def _is_environment_entrypoint(path: Path) -> bool:
+    lowered_parts = {part.lower() for part in path.parts}
+    return "site-packages" in lowered_parts or "dist-packages" in lowered_parts
+
+
+def _discover_entrypoint_path() -> Optional[Path]:
+    main_module = sys.modules.get("__main__")
+    main_file = getattr(main_module, "__file__", None)
+    for candidate in (main_file, sys.argv[0] if sys.argv else None):
+        path = _normalize_entrypoint_path(candidate)
+        if path is not None:
+            return path
+    return None
+
+
+def resolve_default_root(
+    entrypoint: os.PathLike[str] | str | None = None,
+    *,
+    fallback_dir: os.PathLike[str] | str | None = None,
+) -> Path:
+    override = os.environ.get("GRADGLASS_ROOT")
+    if override:
+        return Path(override).expanduser().resolve()
+
+    candidate = _normalize_entrypoint_path(entrypoint) if entrypoint is not None else _discover_entrypoint_path()
+    if (
+        candidate is not None
+        and not _is_gradglass_internal_entrypoint(candidate)
+        and not _is_cli_launcher_path(candidate)
+        and not _is_environment_entrypoint(candidate)
+    ):
+        base_dir = candidate if candidate.is_dir() else candidate.parent
+    else:
+        base_dir = Path(fallback_dir).expanduser().resolve() if fallback_dir is not None else Path.cwd().resolve()
+    return base_dir / DEFAULT_WORKSPACE_DIRNAME
+
+
+class ArtifactStore:
     def __init__(self, root=None):
-        self.root = Path(root) if root else self.DEFAULT_ROOT
+        self.root = Path(root).expanduser() if root is not None else resolve_default_root()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "runs").mkdir(exist_ok=True)
 
     def ensure_run_dir(self, run_id):
         run_dir = self.root / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        for subdir in ["checkpoints", "gradients", "activations", "predictions", "probes", "slices"]:
+        for subdir in ["checkpoints", "gradients", "activations", "predictions", "probes", "slices", "shap", "lime"]:
             (run_dir / subdir).mkdir(exist_ok=True)
         return run_dir
 
     def get_run_dir(self, run_id):
         return self.root / "runs" / run_id
+
+    def _write_json_artifact(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2, default=_artifact_json_default)
+        return payload
 
     def get_run_metadata(self, run_id):
         meta_path = self.root / "runs" / run_id / "metadata.json"
@@ -191,6 +283,36 @@ class ArtifactStore:
             except Exception:
                 continue
         return predictions
+
+    def save_shap(self, run_id, payload):
+        run_dir = self.ensure_run_dir(run_id)
+        normalized = dict(payload or {})
+        normalized["run_id"] = run_id
+        normalized.setdefault("available", True)
+        return self._write_json_artifact(run_dir / "shap" / "summary.json", normalized)
+
+    def save_lime(self, run_id, payload):
+        run_dir = self.ensure_run_dir(run_id)
+        normalized = dict(payload or {})
+        normalized["run_id"] = run_id
+        normalized.setdefault("available", True)
+        return self._write_json_artifact(run_dir / "lime" / "samples.json", normalized)
+
+    def get_shap(self, run_id):
+        shap_dir = self.root / "runs" / run_id / "shap"
+        summary_path = shap_dir / "summary.json"
+        if not shap_dir.exists() or not summary_path.exists():
+            return None
+        with open(summary_path) as f:
+            return json.load(f)
+
+    def get_lime(self, run_id):
+        lime_dir = self.root / "runs" / run_id / "lime"
+        samples_path = lime_dir / "samples.json"
+        if not lime_dir.exists() or not samples_path.exists():
+            return None
+        with open(samples_path) as f:
+            return json.load(f)
 
     def list_probe_steps(self, run_id):
         probe_dir = self.root / "runs" / run_id / "probes"

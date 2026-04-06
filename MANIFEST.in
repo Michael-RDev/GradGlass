@@ -2,24 +2,28 @@
 include LICENSE
 include README.md
 include pyproject.toml
+include setup.py
 
 # Include pre-built dashboard bundle (required at runtime)
 recursive-include gradglass/dashboard/dist *
+recursive-include gradglass/dashboard/src *
+include gradglass/dashboard/package.json
+include gradglass/dashboard/package-lock.json
+include gradglass/dashboard/vite.config.js
+include gradglass/dashboard/tailwind.config.js
+include gradglass/dashboard/postcss.config.js
 
 # Exclude dev/CI/docs from sdist
 prune tests
 prune docs
 prune examples
 prune .github
-prune gradglass/dashboard/src
 prune gradglass/dashboard/node_modules
 prune gradglass/gg_artifacts
 prune gg_artifacts
+prune gradglass/gg_workspace
+prune gg_workspace
 
 exclude test.py
 exclude leakage_report.json
 exclude CONTRIBUTING.md
-exclude gradglass/dashboard/package.json
-exclude gradglass/dashboard/vite.config.js
-exclude gradglass/dashboard/tailwind.config.js
-exclude gradglass/dashboard/postcss.config.js

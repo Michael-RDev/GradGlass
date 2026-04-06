@@ -429,26 +429,28 @@ function CoreHealthCard({ title, icon: Icon, metric, labels, values, lineColor, 
   );
 
   return (
-    <div className="card group">
-      <div className="flex items-center justify-between opacity-90 transition-opacity duration-300 group-hover:opacity-100">
-        <p className="text-sm font-semibold uppercase tracking-wide text-theme-text-secondary transition-colors group-hover:text-theme-primary">{title}</p>
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-theme-primary/10 text-theme-primary transition-transform duration-300 group-hover:scale-110">
-          <Icon className="h-4 w-4" />
+    <div className="glass-card group flex flex-col justify-between">
+      <div>
+        <div className="flex items-center justify-between opacity-90 transition-opacity duration-300 group-hover:opacity-100">
+          <p className="text-sm font-semibold uppercase tracking-wide text-theme-text-secondary transition-colors group-hover:text-theme-primary">{title}</p>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-theme-primary/10 text-theme-primary transition-transform duration-300 group-hover:scale-110">
+            <Icon className="h-4 w-4" />
+          </div>
         </div>
+
+        <div className="mt-4 flex items-end justify-between gap-3">
+          <p className="text-3xl font-extrabold tracking-tight text-theme-text-primary">{displayValue}</p>
+          <MetricBadge metric={metric} />
+        </div>
+
+        <div className="mt-3 h-2 rounded-full bg-theme-border/40 overflow-hidden">
+          <div className="h-full rounded-full" style={{ width: progressWidth, backgroundColor: lineColor }} />
+        </div>
+
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Updated {formatTimestamp(metric?.timestamp)}</p>
       </div>
 
-      <div className="mt-4 flex items-end justify-between gap-3">
-        <p className="text-3xl font-extrabold tracking-tight text-theme-text-primary">{displayValue}</p>
-        <MetricBadge metric={metric} />
-      </div>
-
-      <div className="mt-3 h-2 rounded-full bg-theme-border/40 overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: progressWidth, backgroundColor: lineColor }} />
-      </div>
-
-      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Updated {formatTimestamp(metric?.timestamp)}</p>
-
-      <div className="mt-2 h-14">
+      <div className="mt-4 h-14">
         {hasTrend ? (
           <ReactECharts option={sparklineOption} style={{ width: '100%', height: '100%' }} />
         ) : (
@@ -1038,15 +1040,15 @@ export default function Infrastructure() {
   const latestStepTime = historyLatestValue(history, 'stepTime');
 
   return (
-    <div className="space-y-6">
-      <div className="card">
+    <div className="space-y-8">
+      <div className="glass-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">Infrastructure Telemetry</h1>
-            <p className="mt-3 max-w-2xl text-base leading-relaxed text-theme-text-secondary">
-              Row-based run health, performance, scaling, hardware, and diagnosis dashboard.
+            <h1 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-theme-text-primary to-theme-primary">Infrastructure Telemetry</h1>
+            <p className="mt-4 max-w-3xl text-base leading-relaxed text-theme-text-secondary">
+              Real-time monitoring of hardware utilization, memory pressure, and cluster scaling efficiency.
             </p>
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-medium text-theme-text-muted">
+            <div className="mt-6 flex flex-wrap items-center gap-2 text-xs font-medium text-theme-text-muted">
               <span>Run <span className="font-mono bg-theme-bg/50 px-1 py-0.5 rounded">{runId}</span></span>
               <span>·</span>
               <span>Last update <span className="font-mono">{formatTimestamp(telemetry?.collected_at)}</span></span>
@@ -1073,20 +1075,30 @@ export default function Infrastructure() {
         </div>
 
         {runState?.status_reason && (
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">Run-state note: {runState.status_reason}</p>
+          <p className="mt-4 text-sm font-medium text-theme-text-secondary border-l-4 border-theme-primary pl-3 bg-theme-primary/5 py-2">
+            Run-state note: {runState.status_reason}
+          </p>
         )}
       </div>
 
       {fetchError && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">
           Telemetry refresh failed: {fetchError}
         </div>
       )}
 
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-theme-accent" />
-          <h2 className="h3 text-theme-text-primary">Core Health</h2>
+      <div className="glass-panel">
+        <div className="mb-6 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Cpu className="h-6 w-6 text-theme-accent" />
+              <h2 className="text-2xl font-bold text-theme-text-primary">Core Health</h2>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-theme-primary/30 bg-theme-primary/5 p-5">
+            <h3 className="text-sm font-bold text-theme-primary mb-2">🎓 What to look for: Core Resource Saturation</h3>
+            <p className="text-sm text-theme-text-secondary">If Training Process CPU hits 100%, your dataloaders are likely blocking the accelerator. High System RAM usage indicates memory leaks or excessively large prefetch buffers, which will crash your run. Keep these below 80% to ensure smooth scaling.</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1136,14 +1148,16 @@ export default function Infrastructure() {
         </div>
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <Network className="h-4 w-4 text-theme-accent" />
-          <h2 className="h3 text-theme-text-primary">Performance</h2>
+      <div className="glass-panel">
+        <div className="mb-6">
+          <div className="flex items-center gap-3">
+            <Network className="h-6 w-6 text-theme-accent" />
+            <h2 className="text-2xl font-bold text-theme-text-primary">Performance</h2>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="card h-[390px] flex flex-col">
+          <div className="glass-card h-[390px] flex flex-col">
             <h3 className="h3 text-theme-text-primary flex items-center gap-2">
               <Activity className="h-5 w-5 text-theme-accent" />
               Step Cadence
@@ -1170,7 +1184,7 @@ export default function Infrastructure() {
             </div>
           </div>
 
-          <div className="card h-[390px] flex flex-col">
+          <div className="glass-card h-[390px] flex flex-col">
             <h3 className="h3 text-theme-text-primary flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-theme-accent" />
               Disk + Network Throughput Mix
@@ -1196,14 +1210,16 @@ export default function Infrastructure() {
         </div>
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <Gauge className="h-4 w-4 text-theme-accent" />
-          <h2 className="h3 text-theme-text-primary">Scaling Readiness</h2>
+      <div className="glass-panel">
+        <div className="mb-6">
+          <div className="flex items-center gap-3">
+            <Gauge className="h-6 w-6 text-theme-accent" />
+            <h2 className="text-2xl font-bold text-theme-text-primary">Scaling Readiness</h2>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="card h-[390px] flex flex-col">
+          <div className="glass-card h-[390px] flex flex-col">
             <h3 className="h3 text-theme-text-primary">Readiness Gauge + Trend</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Warning below 60%, critical below 40%.
@@ -1225,7 +1241,7 @@ export default function Infrastructure() {
             </div>
           </div>
 
-          <div className="card h-[390px] flex flex-col">
+          <div className="glass-card h-[390px] flex flex-col">
             <h3 className="h3 text-theme-text-primary">Bottleneck Score Snapshot</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Heuristic penalty scores feeding scaling readiness.
@@ -1267,15 +1283,17 @@ export default function Infrastructure() {
         </div>
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <Server className="h-4 w-4 text-theme-accent" />
-          <h2 className="h3 text-theme-text-primary">Conditional Hardware</h2>
+      <div className="glass-panel">
+        <div className="mb-6">
+          <div className="flex items-center gap-3">
+            <Server className="h-6 w-6 text-theme-accent" />
+            <h2 className="text-2xl font-bold text-theme-text-primary">Conditional Hardware</h2>
+          </div>
         </div>
 
         {showConditionalHardware ? (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="card h-[360px] flex flex-col lg:col-span-2">
+            <div className="glass-card h-[360px] flex flex-col lg:col-span-2">
               <h3 className="h3 text-theme-text-primary">GPU/MPS Utilization</h3>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Aggregate and per-accelerator utilization trends.
@@ -1291,7 +1309,7 @@ export default function Infrastructure() {
               </div>
             </div>
 
-            <div className="card h-[360px] flex flex-col">
+            <div className="glass-card h-[360px] flex flex-col">
               <h3 className="h3 text-theme-text-primary">VRAM Pressure</h3>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Current memory pressure by accelerator.
@@ -1307,7 +1325,7 @@ export default function Infrastructure() {
               </div>
             </div>
 
-            <div className="card h-[360px] flex flex-col lg:col-span-3">
+            <div className="glass-card h-[360px] flex flex-col lg:col-span-3">
               <h3 className="h3 text-theme-text-primary flex items-center gap-2">
                 <Thermometer className="h-5 w-5 text-theme-accent" />
                 Temperature + Power
@@ -1327,7 +1345,7 @@ export default function Infrastructure() {
             </div>
           </div>
         ) : (
-          <div className="card">
+          <div className="glass-card">
             <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
               <Server className="h-4 w-4 text-theme-accent" />
               <p className="text-sm font-medium">No active accelerator telemetry detected.</p>
@@ -1339,14 +1357,20 @@ export default function Infrastructure() {
         )}
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-theme-accent" />
-          <h2 className="h3 text-theme-text-primary">Insights</h2>
+      <div className="glass-panel">
+        <div className="mb-6 flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-6 w-6 text-theme-accent" />
+            <h2 className="text-2xl font-bold text-theme-text-primary">Insights</h2>
+          </div>
+          <div className="rounded-2xl border border-theme-primary/30 bg-theme-primary/5 p-5">
+            <h3 className="text-sm font-bold text-theme-primary mb-2">🎓 What to look for: Diagnostics & Bottlenecks</h3>
+            <p className="text-sm text-theme-text-secondary">Look at the Bottleneck Diagnosis chart. High scores mean you are wasting money on hardware. If you see 'Disk I/O pressure', consider caching datasets in RAM. If you see 'Accelerator starvation', it means your GPUs are waiting on CPUs to feed them batches—optimize your dataloaders immediately.</p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          <div className="card h-[360px] flex flex-col">
+          <div className="glass-card h-[360px] flex flex-col">
             <h3 className="h3 text-theme-text-primary">Bottleneck Diagnosis</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Higher bars indicate stronger contribution to training slowdown.
@@ -1362,7 +1386,7 @@ export default function Infrastructure() {
             </div>
           </div>
 
-          <div className="card h-[360px] flex flex-col">
+          <div className="glass-card h-[360px] flex flex-col">
             <h3 className="h3 text-theme-text-primary">Warnings</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Heuristic and diagnostic warnings derived from current telemetry.
@@ -1390,7 +1414,7 @@ export default function Infrastructure() {
             </div>
           </div>
 
-          <div className="card h-[360px] flex flex-col">
+          <div className="glass-card h-[360px] flex flex-col">
             <h3 className="h3 text-theme-text-primary">Recommended Fixes</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Actionable next steps based on active warning rules.
@@ -1412,8 +1436,8 @@ export default function Infrastructure() {
         </div>
       </div>
 
-      <details className="card">
-        <summary className="cursor-pointer select-none text-sm font-semibold text-theme-text-primary">Diagnostics and Probe Details</summary>
+      <details className="glass-panel">
+        <summary className="cursor-pointer select-none text-xl font-bold text-theme-text-primary outline-none">Diagnostics and Probe Details</summary>
         <div className="mt-3 space-y-3 text-xs text-slate-600 dark:text-slate-300">
           <p>
             Run status: <span className="font-mono">{runState?.status || 'unknown'}</span> · Process alive:{' '}

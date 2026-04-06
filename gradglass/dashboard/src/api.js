@@ -60,6 +60,14 @@ export async function fetchSaliency(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/saliency`);
 }
 
+export async function fetchShap(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/shap`);
+}
+
+export async function fetchLime(runId) {
+  return fetchJSON(`/runs/${encodeRunId(runId)}/lime`);
+}
+
 export async function fetchEmbeddings(runId) {
   return fetchJSON(`/runs/${encodeRunId(runId)}/embeddings`);
 }

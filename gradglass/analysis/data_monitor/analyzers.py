@@ -252,13 +252,25 @@ def build_composition_slice(
         }
         numerical_feature_stats[name] = stat
         spread = abs(float(stat["p90"] or 0.0) - float(stat["p10"] or 0.0))
+        std_value = float(stat["std"] or 0.0)
+        if spread <= 1e-6 and abs(std_value) <= 1e-6:
+            continue
         outlier_features.append({"feature": name, "spread": round(spread, 6), "std": stat["std"]})
     outlier_features.sort(key=lambda item: float(item.get("spread", 0.0)), reverse=True)
+
+    source_sample_count = metadata.get("source_sample_count")
+    try:
+        source_sample_count = int(source_sample_count) if source_sample_count is not None else None
+    except (TypeError, ValueError):
+        source_sample_count = None
+    composition_sample_count = len(observations)
+    if source_sample_count is not None:
+        composition_sample_count = max(composition_sample_count, source_sample_count)
 
     return CompositionSlice(
         stage=stage,
         split=split,
-        sample_count=len(observations),
+        sample_count=composition_sample_count,
         modality_proportions=modality_proportions,
         class_distribution=class_distribution,
         regression_target_distribution=regression_target_distribution,
@@ -317,12 +329,20 @@ def build_split_comparisons(
                     col_a = matrix_a[:, idx_a[name]]
                     col_b = matrix_b[:, idx_b[name]]
                     mean_diff = abs(float(np.nanmean(col_a) - np.nanmean(col_b)))
-                    std_ratio = float(
-                        max(np.nanstd(col_a), np.nanstd(col_b)) / (min(np.nanstd(col_a), np.nanstd(col_b)) + 1e-8)
-                    )
-                    drift_scores.append({"feature": name, "mean_diff": round(mean_diff, 6), "std_ratio": round(std_ratio, 4)})
-                drift_scores.sort(key=lambda item: (item["mean_diff"], item["std_ratio"]), reverse=True)
-                numeric_drift = {"available": True, "top_drifted_features": drift_scores[: config.top_feature_limit]}
+                    std_a = float(np.nanstd(col_a))
+                    std_b = float(np.nanstd(col_b))
+                    if std_a <= 1e-8 and std_b <= 1e-8:
+                        std_ratio = 1.0
+                    else:
+                        std_ratio = float(max(std_a, std_b) / (min(std_a, std_b) + 1e-8))
+                    drift_item = {"feature": name, "mean_diff": round(mean_diff, 6), "std_ratio": round(std_ratio, 4)}
+                    if drift_item["mean_diff"] > 1e-6 or abs(drift_item["std_ratio"] - 1.0) > 0.05:
+                        drift_scores.append(drift_item)
+                drift_scores.sort(key=lambda item: (item["mean_diff"], abs(item["std_ratio"] - 1.0)), reverse=True)
+                numeric_drift = {
+                    "available": bool(drift_scores),
+                    "top_drifted_features": drift_scores[: config.top_feature_limit],
+                }
 
         modality_a = record_a.snapshot.modality_metadata.get("modality_proportions", {})
         modality_b = record_b.snapshot.modality_metadata.get("modality_proportions", {})

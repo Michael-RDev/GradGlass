@@ -34,6 +34,8 @@ htmlcov/
 .mypy_cache/
 
 # === GradGlass runtime artifacts ===
+gg_workspace/
+examples/gg_workspace/
 gg_artifacts/
 leakage_report.json
 

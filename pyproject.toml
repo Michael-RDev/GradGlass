@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gradglass"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Neural network transparency engine — inspect, compare, debug, and mutate your models locally."
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "Apache-2.0"
 requires-python = ">=3.9"
 authors = [{name = "GradGlass Team", email = "hello@gradglass.dev"}]
 keywords = ["deep-learning", "neural-network", "debugging", "visualization", "pytorch", "tensorflow"]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -35,17 +34,18 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/gradglass/gradglass"
-Repository = "https://github.com/gradglass/gradglass"
-Documentation = "https://github.com/gradglass/gradglass/blob/main/docs/getting-started.md"
-"Bug Tracker" = "https://github.com/gradglass/gradglass/issues"
+Homepage = "https://github.com/Michael-RDev/GradGlass"
+Repository = "https://github.com/Michael-RDev/GradGlass"
+Documentation = "https://github.com/Michael-RDev/GradGlass/blob/main/docs/getting-started.md"
+"Bug Tracker" = "https://github.com/Michael-RDev/GradGlass/issues"
 
 [project.optional-dependencies]
 torch = ["torch>=1.12"]
 tensorflow = ["tensorflow>=2.10"]
 scipy = ["scipy>=1.7"]
-all = ["torch>=1.12", "tensorflow>=2.10", "scipy>=1.7"]
-dev = ["pytest", "pytest-asyncio", "pytest-cov", "httpx", "ruff"]
+explainability = ["shap>=0.44"]
+all = ["torch>=1.12", "tensorflow>=2.10", "scipy>=1.7", "shap>=0.44"]
+dev = ["build", "pytest", "pytest-asyncio", "pytest-cov", "httpx", "ruff"]
 
 [project.scripts]
 gradglass = "gradglass.cli:main"
@@ -57,6 +57,9 @@ include = ["gradglass*"]
 [tool.setuptools.package-data]
 gradglass = ["dashboard/dist/**/*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "gradglass._version.__version__"}
+
 [tool.ruff]
 line-length = 120
 target-version = "py39"
@@ -65,7 +68,6 @@ target-version = "py39"
 skip-magic-trailing-comma = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--tb=short -q"
 

@@ -201,6 +201,8 @@ def build_monitor_report_for_arrays(
     train_y = _coerce_numpy(train_y)
     test_x = _coerce_numpy(test_x)
     test_y = _coerce_numpy(test_y)
+    full_train_count = len(train_x)
+    full_test_count = len(test_x)
     train_x, train_y, test_x, test_y = _subset_arrays(train_x, train_y, test_x, test_y, max_samples, random_state)
     builder = DatasetMonitorBuilder(
         task=_infer_task_from_labels(train_y),
@@ -215,14 +217,14 @@ def build_monitor_report_for_arrays(
         split="train",
         data=train_x,
         labels=train_y,
-        metadata={"source": "legacy_leakage_wrapper"},
+        metadata={"source": "legacy_leakage_wrapper", "source_sample_count": full_train_count},
     )
     builder.record_stage(
         PipelineStage.SPLITTING,
         split="test",
         data=test_x,
         labels=test_y,
-        metadata={"source": "legacy_leakage_wrapper"},
+        metadata={"source": "legacy_leakage_wrapper", "source_sample_count": full_test_count},
     )
     return builder.finalize(save=save)
 

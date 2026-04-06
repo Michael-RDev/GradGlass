@@ -3,6 +3,7 @@ import asyncio
 import numpy as np
 
 from gradglass.analysis.data_monitor import DatasetMonitorBuilder, PipelineStage
+from gradglass.analysis.leakage import build_monitor_report_for_arrays
 from gradglass.analysis.data_monitor.inspectors import detect_modality
 from gradglass.artifacts import ArtifactStore
 from gradglass.run import Run
@@ -140,3 +141,50 @@ def test_detect_modality_covers_text_image_and_audio_like_inputs():
     assert detect_modality("hello world").value == "text"
     assert detect_modality(np.random.randn(32, 32).astype(np.float32)).value == "image"
     assert detect_modality(np.random.randn(16000, 2).astype(np.float32), task_hint="audio waveform").value == "audio"
+
+
+def test_leakage_monitor_preserves_full_split_counts_when_sampling():
+    train_x = np.arange(60000 * 2, dtype=np.float32).reshape(60000, 2)
+    train_y = np.arange(60000, dtype=np.int64) % 10
+    test_x = np.arange(10000 * 2, dtype=np.float32).reshape(10000, 2)
+    test_y = np.arange(10000, dtype=np.int64) % 10
+
+    report = build_monitor_report_for_arrays(
+        train_x,
+        train_y,
+        test_x,
+        test_y,
+        max_samples=2000,
+        random_state=7,
+        save=False,
+    )
+
+    snapshots = {snapshot["split"]: snapshot for snapshot in report.pipeline["snapshots"]}
+    assert snapshots["train"]["sample_count"] == 60000
+    assert snapshots["train"]["observed_sample_count"] == 2000
+    assert snapshots["train"]["sample_coverage"] == round(2000 / 60000, 4)
+    assert snapshots["test"]["sample_count"] == 10000
+    assert snapshots["test"]["observed_sample_count"] == 2000
+    assert snapshots["test"]["sample_coverage"] == round(2000 / 10000, 4)
+    splitting_card = next(card for card in report.dashboard.stage_cards if card["stage"] == "splitting")
+    assert splitting_card["sample_count"] == 70000
+
+
+def test_vision_monitor_favors_image_summaries_over_zero_drift_feature_rows():
+    builder = DatasetMonitorBuilder("vision", dataset_name="vision-data")
+    train = np.random.randn(12, 28, 28).astype(np.float32)
+    test = np.random.randn(10, 28, 28).astype(np.float32)
+    builder.record_stage(PipelineStage.SPLITTING, split="train", data=train, labels=np.arange(12) % 3)
+    builder.record_stage(PipelineStage.SPLITTING, split="test", data=test, labels=np.arange(10) % 3)
+
+    report = builder.finalize(save=False)
+
+    assert report.composition.latest_by_split["train"].outlier_features == []
+    assert report.composition.latest_by_split["test"].outlier_features == []
+    assert report.split_comparisons[0].numeric_drift_summary["top_drifted_features"] == []
+
+    panel_titles = {panel.title for panel in report.dashboard.composition_panels}
+    assert "Train Image Heights" in panel_titles
+    assert "Train Image Widths" in panel_titles
+    assert "Train Image Aspect Ratios" in panel_titles
+    assert "Train Top Outlier Features" not in panel_titles

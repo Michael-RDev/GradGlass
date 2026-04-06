@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any, Optional
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from gradglass._version import __version__
 from gradglass.alerts import build_alert_snapshot
 from gradglass.analysis.data_monitor import load_dataset_monitor_report
 from gradglass.analysis.leakage import project_monitor_report_to_legacy_dict
@@ -23,6 +24,12 @@ from gradglass.evaluation import build_evaluation_payload
 from gradglass.experiment_tracking import build_overview_snapshot, normalize_run_status
 from gradglass.telemetry import collect_infrastructure_telemetry
 from gradglass.visualizations import build_distributions_payload, build_embeddings_payload, build_saliency_payload
+
+
+class MutationRequest(BaseModel):
+    operation: str
+    target_layer: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[list[dict[str, Any]]] = None):
@@ -42,7 +49,7 @@ def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[l
 
 
 def create_app(store):
-    app = FastAPI(title="GradGlass", description="Neural Network Transparency Engine", version="1.0.0")
+    app = FastAPI(title="GradGlass", description="Neural Network Transparency Engine", version=__version__)
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
     )
@@ -178,6 +185,20 @@ def create_app(store):
         if not store.get_run_dir(run_id).exists():
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
         return build_embeddings_payload(store, run_id, step=step)
+
+    @app.get("/api/runs/{run_id}/shap")
+    async def get_shap(run_id):
+        shap_data = store.get_shap(run_id)
+        if not shap_data:
+            raise HTTPException(status_code=404, detail=f"No SHAP data found for run '{run_id}'")
+        return shap_data
+
+    @app.get("/api/runs/{run_id}/lime")
+    async def get_lime(run_id):
+        lime_data = store.get_lime(run_id)
+        if not lime_data:
+            raise HTTPException(status_code=404, detail=f"No LIME data found for run '{run_id}'")
+        return lime_data
 
     @app.get("/api/runs/{run_id}/predictions")
     async def get_predictions(run_id):
@@ -338,13 +359,8 @@ def create_app(store):
             )
         return report.model_dump(mode="json")
 
-    class MutationRequest(BaseModel):
-        operation: str
-        target_layer: str
-        params: dict[str, Any] = {}
-
     @app.post("/api/runs/{run_id}/architecture/mutate")
-    async def mutate_architecture(run_id: str, mutation: MutationRequest):
+    async def mutate_architecture(run_id: str, mutation: MutationRequest = Body(...)):
         arch = store.get_architecture(run_id)
         if arch is None:
             raise HTTPException(status_code=404, detail="No architecture data found")
@@ -476,7 +492,7 @@ def create_app(store):
         @app.get("/")
         async def dashboard_placeholder():
             return HTMLResponse(
-                '\n            <!DOCTYPE html>\n            <html>\n            <head><title>GradGlass</title></head>\n            <body style="font-family: system-ui; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; background:#0f172a; color:#e2e8f0;">\n                <div style="text-align:center">\n                    <h1>🔬 GradGlass v1.0</h1>\n                    <p>Dashboard build not found. API is running.</p>\n                    <p>Try: <code>GET /api/runs</code></p>\n                </div>\n            </body>\n            </html>\n            '
+                f'\n            <!DOCTYPE html>\n            <html>\n            <head><title>GradGlass</title></head>\n            <body style="font-family: system-ui; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; background:#0f172a; color:#e2e8f0;">\n                <div style="text-align:center">\n                    <h1>🔬 GradGlass v{__version__}</h1>\n                    <p>Dashboard build not found. API is running.</p>\n                    <p>Try: <code>GET /api/runs</code></p>\n                </div>\n            </body>\n            </html>\n            '
             )
 
     return app
@@ -570,7 +586,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the GradGlass dashboard server.")
-    parser.add_argument("--root", default=None, help="Artifact store root. Defaults to ./gg_artifacts in the cwd.")
+    parser.add_argument("--root", default=None, help="Artifact store root. Defaults to ./gg_workspace in the current directory.")
     parser.add_argument("--port", type=int, default=8432, help="Port to bind the GradGlass dashboard server.")
     parser.add_argument(
         "--open-browser",
