@@ -18,15 +18,7 @@ def test_run_log_shap_persists_ranked_summary_from_numpy(tmp_path):
     run = Run(name="shap-numpy", store=store, auto_open=False)
 
     payload = run.log_shap(
-        ["age", "income", "score"],
-        np.array(
-            [
-                [0.1, -0.6, 0.2],
-                [0.5, -0.4, 0.1],
-            ],
-            dtype=np.float32,
-        ),
-        top_k=2,
+        ["age", "income", "score"], np.array([[0.1, -0.6, 0.2], [0.5, -0.4, 0.1]], dtype=np.float32), top_k=2
     )
 
     assert payload["run_id"] == run.run_id
@@ -45,21 +37,10 @@ def test_run_log_shap_accepts_explanation_like_objects(tmp_path):
     run = Run(name="shap-explanation", store=store, auto_open=False)
 
     explanation = _FakeExplanation(
-        np.array(
-            [
-                [[0.2, 0.1, -0.3], [0.6, -0.1, 0.2]],
-                [[0.1, -0.2, 0.4], [0.5, 0.1, -0.1]],
-            ],
-            dtype=np.float32,
-        )
+        np.array([[[0.2, 0.1, -0.3], [0.6, -0.1, 0.2]], [[0.1, -0.2, 0.4], [0.5, 0.1, -0.1]]], dtype=np.float32)
     )
 
-    payload = run.log_shap(
-        ["signal_left", "signal_right"],
-        explanation,
-        message="Custom SHAP aggregation.",
-        top_k=1,
-    )
+    payload = run.log_shap(["signal_left", "signal_right"], explanation, message="Custom SHAP aggregation.", top_k=1)
 
     assert payload["message"] == "Custom SHAP aggregation."
     assert payload["summary_plot"] == [{"feature": "signal_right", "mean_shap": 0.266667}]
@@ -99,11 +80,7 @@ def test_run_log_lime_persists_normalized_samples(tmp_path):
 def test_shap_and_lime_endpoints_return_saved_artifacts(tmp_path):
     store = ArtifactStore(root=tmp_path)
     store.save_shap(
-        "api-run",
-        {
-            "message": "Saved SHAP payload.",
-            "summary_plot": [{"feature": "income", "mean_shap": 0.8}],
-        },
+        "api-run", {"message": "Saved SHAP payload.", "summary_plot": [{"feature": "income", "mean_shap": 0.8}]}
     )
     store.save_lime(
         "api-run",
@@ -139,9 +116,7 @@ def test_shap_and_lime_endpoints_return_saved_artifacts(tmp_path):
 def test_architecture_mutation_route_accepts_json_body(tmp_path):
     app = create_app(ArtifactStore(root=tmp_path))
     route = next(
-        route
-        for route in app.router.routes
-        if getattr(route, "path", None) == "/api/runs/{run_id}/architecture/mutate"
+        route for route in app.router.routes if getattr(route, "path", None) == "/api/runs/{run_id}/architecture/mutate"
     )
 
     assert [param.name for param in route.dependant.body_params] == ["mutation"]

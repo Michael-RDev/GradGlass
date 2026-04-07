@@ -13,21 +13,14 @@ from gradglass.server import create_app
 def test_dataset_monitor_builder_persists_report_and_computes_stage_deltas(tmp_path):
     run_dir = tmp_path / "demo-run"
     builder = DatasetMonitorBuilder(
-        "classification",
-        dataset_name="demo-dataset",
-        task_hint="tabular",
-        run_dir=run_dir,
-        run_id="demo-run",
+        "classification", dataset_name="demo-dataset", task_hint="tabular", run_dir=run_dir, run_id="demo-run"
     )
     raw_rows = [
         {"feature_a": 1.0, "feature_b": 2.0, "optional": "x"},
         {"feature_a": 3.0, "feature_b": 4.0, "optional": None},
         {"feature_a": 5.0, "feature_b": 6.0, "optional": "z"},
     ]
-    cleaned_rows = [
-        {"feature_a": 1.0, "feature_b": 2.0},
-        {"feature_a": 5.0, "feature_b": 6.0},
-    ]
+    cleaned_rows = [{"feature_a": 1.0, "feature_b": 2.0}, {"feature_a": 5.0, "feature_b": 6.0}]
 
     builder.record_stage(PipelineStage.RAW_DATA, split="train", data=raw_rows, labels=np.array([0, 1, 0]))
     builder.record_stage(PipelineStage.CLEANING, split="train", data=cleaned_rows, labels=np.array([0, 0]))
@@ -44,7 +37,9 @@ def test_dataset_monitor_builder_persists_report_and_computes_stage_deltas(tmp_p
 
 def test_dataset_monitor_supports_multiple_modalities_and_unknown_safe_results(tmp_path):
     builder = DatasetMonitorBuilder("multimodal", dataset_name="mixed")
-    builder.record_stage(PipelineStage.RAW_DATA, split="train", data=["hello world", "a much longer example"], labels=np.array([0, 1]))
+    builder.record_stage(
+        PipelineStage.RAW_DATA, split="train", data=["hello world", "a much longer example"], labels=np.array([0, 1])
+    )
     builder.record_stage(
         PipelineStage.RAW_DATA,
         split="validation",
@@ -52,10 +47,7 @@ def test_dataset_monitor_supports_multiple_modalities_and_unknown_safe_results(t
         labels=np.array([0, 1, 1]),
     )
     builder.record_stage(
-        PipelineStage.RAW_DATA,
-        split="test",
-        data=np.random.randn(2, 16000).astype(np.float32),
-        labels=np.array([1, 0]),
+        PipelineStage.RAW_DATA, split="test", data=np.random.randn(2, 16000).astype(np.float32), labels=np.array([1, 0])
     )
     report = builder.finalize(save=False)
 
@@ -102,12 +94,7 @@ def test_run_monitor_dataset_and_check_leakage_emit_artifacts(tmp_path):
 def test_data_monitor_and_leakage_endpoints(tmp_path):
     store = ArtifactStore(root=tmp_path)
     run_dir = store.ensure_run_dir("api-run")
-    builder = DatasetMonitorBuilder(
-        "classification",
-        dataset_name="api-dataset",
-        run_dir=run_dir,
-        run_id="api-run",
-    )
+    builder = DatasetMonitorBuilder("classification", dataset_name="api-dataset", run_dir=run_dir, run_id="api-run")
     builder.record_stage(
         PipelineStage.SPLITTING,
         split="train",
@@ -150,13 +137,7 @@ def test_leakage_monitor_preserves_full_split_counts_when_sampling():
     test_y = np.arange(10000, dtype=np.int64) % 10
 
     report = build_monitor_report_for_arrays(
-        train_x,
-        train_y,
-        test_x,
-        test_y,
-        max_samples=2000,
-        random_state=7,
-        save=False,
+        train_x, train_y, test_x, test_y, max_samples=2000, random_state=7, save=False
     )
 
     snapshots = {snapshot["split"]: snapshot for snapshot in report.pipeline["snapshots"]}

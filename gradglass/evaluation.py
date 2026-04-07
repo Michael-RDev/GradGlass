@@ -179,10 +179,7 @@ BENCHMARK_FAMILY_ELIGIBILITY = {
     "time_series_forecasting": [],
 }
 
-BENCHMARK_FAMILY_DISPLAY_NAMES = {
-    "llm": "LLM Benchmarks",
-    "vision": "Vision Benchmarks",
-}
+BENCHMARK_FAMILY_DISPLAY_NAMES = {"llm": "LLM Benchmarks", "vision": "Vision Benchmarks"}
 
 
 def build_evaluation_payload(
@@ -202,24 +199,16 @@ def build_evaluation_payload(
     benchmark_state = build_benchmark_state(metadata=metadata, inferred_task=inferred_task)
 
     evaluations = build_evaluations(
-        predictions=predictions,
-        metrics=metrics,
-        metadata=metadata,
-        inferred_task=inferred_task,
-        modalities=modalities,
+        predictions=predictions, metrics=metrics, metadata=metadata, inferred_task=inferred_task, modalities=modalities
     )
     latest_evaluation = evaluations[-1] if evaluations else None
 
     missing_artifacts = collect_missing_artifacts(
-        inferred_task=inferred_task,
-        predictions=predictions,
-        latest_evaluation=latest_evaluation,
+        inferred_task=inferred_task, predictions=predictions, latest_evaluation=latest_evaluation
     )
     selected_metrics = build_selected_metrics(inferred_task=inferred_task, latest_evaluation=latest_evaluation)
     performance_summary = build_performance_summary(
-        inferred_task=inferred_task,
-        latest_evaluation=latest_evaluation,
-        selected_metrics=selected_metrics,
+        inferred_task=inferred_task, latest_evaluation=latest_evaluation, selected_metrics=selected_metrics
     )
     trend_analysis = build_trend_analysis(inferred_task=inferred_task, evaluations=evaluations)
     error_analysis = build_error_analysis(
@@ -288,11 +277,7 @@ def benchmarks_enabled(metadata: dict[str, Any]) -> bool:
 def build_benchmark_state(*, metadata: dict[str, Any], inferred_task: str) -> dict[str, Any]:
     enabled = benchmarks_enabled(metadata)
     if not enabled:
-        return {
-            "enabled": False,
-            "eligible_families": [],
-            "message": "Benchmarks disabled for this run.",
-        }
+        return {"enabled": False, "eligible_families": [], "message": "Benchmarks disabled for this run."}
 
     eligible_families = list(BENCHMARK_FAMILY_ELIGIBILITY.get(inferred_task, []))
     if eligible_families:
@@ -302,11 +287,7 @@ def build_benchmark_state(*, metadata: dict[str, Any], inferred_task: str) -> di
         task_label = TASK_DISPLAY_NAMES.get(inferred_task, inferred_task.replace("_", " "))
         message = f"Benchmarks are enabled, but {task_label} runs do not have a compatible benchmark family."
 
-    return {
-        "enabled": True,
-        "eligible_families": eligible_families,
-        "message": message,
-    }
+    return {"enabled": True, "eligible_families": eligible_families, "message": message}
 
 
 def infer_task_distribution(
@@ -464,9 +445,7 @@ def evaluate_prediction_record(
 
     snapshot["selected_metrics"] = build_selected_metrics(inferred_task=task_type, latest_evaluation=snapshot)
     snapshot["missing_artifacts"] = collect_missing_artifacts(
-        inferred_task=task_type,
-        predictions=[record],
-        latest_evaluation=snapshot,
+        inferred_task=task_type, predictions=[record], latest_evaluation=snapshot
     )
     snapshot["metric_values"] = extract_metric_values(snapshot)
     return snapshot
@@ -477,7 +456,9 @@ def build_metric_snapshots(metrics: list[dict[str, Any]], inferred_task: str) ->
     if not alias_map:
         return []
 
-    preferred_rows = [row for row in metrics if any(str(key).lower().startswith(("val_", "test_")) for key in row.keys())]
+    preferred_rows = [
+        row for row in metrics if any(str(key).lower().startswith(("val_", "test_")) for key in row.keys())
+    ]
     rows = preferred_rows or metrics
     snapshots: list[dict[str, Any]] = []
 
@@ -502,9 +483,7 @@ def build_metric_snapshots(metrics: list[dict[str, Any]], inferred_task: str) ->
                 {"name": name, "justification": METRIC_JUSTIFICATIONS.get(name, "Logged metric available.")}
                 for name in metric_values.keys()
             ],
-            "missing_artifacts": [
-                "Per-example predictions and targets were not logged for this step.",
-            ],
+            "missing_artifacts": ["Per-example predictions and targets were not logged for this step."],
         }
         snapshot.update(metric_values)
         if inferred_task == "classification":
@@ -691,7 +670,9 @@ def build_error_analysis(
                 f"{residual['p95_abs_error']:.4f}."
             )
 
-    generalization = assess_generalization(metrics=metrics, latest_evaluation=latest_evaluation, inferred_task=inferred_task)
+    generalization = assess_generalization(
+        metrics=metrics, latest_evaluation=latest_evaluation, inferred_task=inferred_task
+    )
     if generalization.get("status") not in {"stable", "insufficient_data"}:
         summary.append(generalization.get("message", "Generalization warning detected."))
     elif not summary and missing_artifacts:
@@ -735,11 +716,7 @@ def build_modality_analysis(modalities: list[str], predictions: list[dict[str, A
             ),
         }
 
-    return {
-        "modalities": modalities,
-        "per_modality": per_modality,
-        "cross_modal_alignment": cross_modal_alignment,
-    }
+    return {"modalities": modalities, "per_modality": per_modality, "cross_modal_alignment": cross_modal_alignment}
 
 
 def collect_missing_artifacts(
@@ -747,7 +724,9 @@ def collect_missing_artifacts(
 ) -> list[str]:
     missing: list[str] = []
     if not predictions:
-        missing.append("Per-example predictions and targets were not logged; deeper evaluation is based on run metrics only.")
+        missing.append(
+            "Per-example predictions and targets were not logged; deeper evaluation is based on run metrics only."
+        )
 
     if inferred_task == "classification":
         if latest_evaluation and not latest_evaluation.get("confusion_matrix"):
@@ -757,17 +736,26 @@ def collect_missing_artifacts(
     elif inferred_task in {"regression", "time_series_forecasting"}:
         if latest_evaluation and not latest_evaluation.get("residual_summary"):
             missing.append("Aligned numeric targets and predictions are needed for residual diagnostics.")
-        if inferred_task == "time_series_forecasting" and latest_evaluation and not latest_evaluation.get("per_horizon"):
+        if (
+            inferred_task == "time_series_forecasting"
+            and latest_evaluation
+            and not latest_evaluation.get("per_horizon")
+        ):
             missing.append("Multi-horizon targets/predictions are needed for horizon-wise forecast diagnostics.")
     elif inferred_task == "sequence_generation":
         if not any(any(key in record for key in ("reference", "references", "y_true")) for record in predictions):
             missing.append("Reference text is missing, so overlap metrics like BLEU and ROUGE cannot be computed.")
-        if not any(any(key in record for key in ("output_embeddings", "reference_embeddings")) for record in predictions):
+        if not any(
+            any(key in record for key in ("output_embeddings", "reference_embeddings")) for record in predictions
+        ):
             missing.append("Embeddings are missing, so semantic-similarity checks are limited.")
     elif inferred_task == "retrieval_embedding":
         if not any(any(key in record for key in ("relevant_ids", "relevance", "labels")) for record in predictions):
             missing.append("Relevance labels are missing, so Recall@K is limited.")
-        if not any(any(key in record for key in ("query_embeddings", "reference_embeddings", "embeddings")) for record in predictions):
+        if not any(
+            any(key in record for key in ("query_embeddings", "reference_embeddings", "embeddings"))
+            for record in predictions
+        ):
             missing.append("Embedding vectors are missing, so cosine-similarity analysis is limited.")
     elif inferred_task == "vision":
         if latest_evaluation and not any(key in latest_evaluation for key in ("mean_iou", "mAP_50", "top_1_accuracy")):
@@ -796,29 +784,45 @@ def build_recommendations(
     recommendations: list[str] = []
 
     if ambiguity:
-        recommendations.append("Set an explicit `task` in run metadata so task inference does not need to rely on heuristics.")
+        recommendations.append(
+            "Set an explicit `task` in run metadata so task inference does not need to rely on heuristics."
+        )
     if missing_artifacts:
-        recommendations.append("Log richer per-example artifacts with `run.log_batch()` to unlock deeper diagnostics and confusion/error views.")
+        recommendations.append(
+            "Log richer per-example artifacts with `run.log_batch()` to unlock deeper diagnostics and confusion/error views."
+        )
 
     weak_classes = error_analysis.get("weak_classes") or []
     if weak_classes:
-        recommendations.append("Prioritize the weakest classes/labels with targeted sampling, augmentation, or threshold tuning.")
+        recommendations.append(
+            "Prioritize the weakest classes/labels with targeted sampling, augmentation, or threshold tuning."
+        )
 
     overconfident = error_analysis.get("overconfident_errors") or {}
     if overconfident.get("count", 0) > 0:
-        recommendations.append("Calibrate prediction confidence or add hard-negative examples to reduce overconfident mistakes.")
+        recommendations.append(
+            "Calibrate prediction confidence or add hard-negative examples to reduce overconfident mistakes."
+        )
 
     generalization = error_analysis.get("generalization") or {}
     if generalization.get("status") == "possible_overfitting":
-        recommendations.append("Add regularization, early stopping, or more validation coverage to reduce overfitting pressure.")
+        recommendations.append(
+            "Add regularization, early stopping, or more validation coverage to reduce overfitting pressure."
+        )
     elif generalization.get("status") == "possible_underfitting":
-        recommendations.append("Increase model capacity, training time, or feature richness to address likely underfitting.")
+        recommendations.append(
+            "Increase model capacity, training time, or feature richness to address likely underfitting."
+        )
 
     if inferred_task == "time_series_forecasting":
         if latest_evaluation and not latest_evaluation.get("per_horizon"):
-            recommendations.append("Log multi-horizon predictions so forecast quality can be inspected horizon by horizon.")
+            recommendations.append(
+                "Log multi-horizon predictions so forecast quality can be inspected horizon by horizon."
+            )
     elif inferred_task == "sequence_generation":
-        recommendations.append("Attach reference outputs or embeddings when possible so text quality can be scored beyond qualitative review.")
+        recommendations.append(
+            "Attach reference outputs or embeddings when possible so text quality can be scored beyond qualitative review."
+        )
     elif inferred_task == "retrieval_embedding":
         recommendations.append("Log ranked candidates plus relevance labels so Recall@K can be tracked over time.")
 
@@ -833,9 +837,7 @@ def build_recommendations(
     return trimmed
 
 
-def detect_modalities(
-    *, predictions: list[dict[str, Any]], metadata: dict[str, Any], inferred_task: str
-) -> list[str]:
+def detect_modalities(*, predictions: list[dict[str, Any]], metadata: dict[str, Any], inferred_task: str) -> list[str]:
     detected: list[str] = []
     task_hint = str(((metadata.get("config") or {}).get("task") or metadata.get("task") or "")).lower()
 
@@ -1056,7 +1058,9 @@ def _score_prediction_record(record: dict[str, Any]) -> tuple[dict[str, float], 
     return scores, evidence
 
 
-def _evaluate_classification(y_true: np.ndarray, y_pred: np.ndarray, confidence: Optional[np.ndarray]) -> dict[str, Any]:
+def _evaluate_classification(
+    y_true: np.ndarray, y_pred: np.ndarray, confidence: Optional[np.ndarray]
+) -> dict[str, Any]:
     true_labels = _flatten_labels(y_true)
     pred_labels = _flatten_labels(y_pred)
     n = min(len(true_labels), len(pred_labels))
@@ -1171,10 +1175,7 @@ def _evaluate_classification(y_true: np.ndarray, y_pred: np.ndarray, confidence:
         "macro_f1": float(macro_f1 / num_classes),
         "micro_f1": accuracy,
         "support": support,
-        "confusion_matrix": {
-            "classes": [_to_jsonable_scalar(cls) for cls in classes],
-            "matrix": cm.tolist(),
-        },
+        "confusion_matrix": {"classes": [_to_jsonable_scalar(cls) for cls in classes], "matrix": cm.tolist()},
         "per_class": per_class,
         "weak_classes": weak_classes,
         "dominant_misclassifications": dominant_misclassifications[:5],
@@ -1198,7 +1199,9 @@ def _evaluate_multilabel_classification(y_true: np.ndarray, y_pred: np.ndarray) 
     fn = (y_true_bin * (1 - y_pred_bin)).sum(axis=0)
     precision = np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) > 0)
     recall = np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) > 0)
-    f1 = np.divide(2 * precision * recall, precision + recall, out=np.zeros_like(tp, dtype=float), where=(precision + recall) > 0)
+    f1 = np.divide(
+        2 * precision * recall, precision + recall, out=np.zeros_like(tp, dtype=float), where=(precision + recall) > 0
+    )
 
     support = y_true_bin.sum(axis=0)
     per_class = []
@@ -1270,18 +1273,17 @@ def _evaluate_regression_like(y_true: np.ndarray, y_pred: np.ndarray, *, time_se
         pred_flat = pred_arr.reshape(-1)
 
     error = pred_flat - true_flat
-    mse = float(np.mean(error ** 2))
+    mse = float(np.mean(error**2))
     mae = float(np.mean(np.abs(error)))
     rmse = float(np.sqrt(mse))
     variance = float(np.var(true_flat))
-    r2 = float(1.0 - np.sum(error ** 2) / max(np.sum((true_flat - np.mean(true_flat)) ** 2), 1e-12)) if variance > 0 else 0.0
+    r2 = (
+        float(1.0 - np.sum(error**2) / max(np.sum((true_flat - np.mean(true_flat)) ** 2), 1e-12))
+        if variance > 0
+        else 0.0
+    )
 
-    metric_values = {
-        "mse": mse,
-        "rmse": rmse,
-        "mae": mae,
-        "r2": r2,
-    }
+    metric_values = {"mse": mse, "rmse": rmse, "mae": mae, "r2": r2}
     non_zero_mask = np.abs(true_flat) > 1e-8
     if np.any(non_zero_mask):
         mape = float(np.mean(np.abs(error[non_zero_mask] / true_flat[non_zero_mask])))
@@ -1309,13 +1311,9 @@ def _evaluate_regression_like(y_true: np.ndarray, y_pred: np.ndarray, *, time_se
             horizon_true = true_arr[..., idx].reshape(-1)
             horizon_pred = pred_arr[..., idx].reshape(-1)
             horizon_err = horizon_pred - horizon_true
-            horizon_mse = float(np.mean(horizon_err ** 2))
+            horizon_mse = float(np.mean(horizon_err**2))
             per_horizon.append(
-                {
-                    "horizon": idx,
-                    "rmse": float(np.sqrt(horizon_mse)),
-                    "mae": float(np.mean(np.abs(horizon_err))),
-                }
+                {"horizon": idx, "rmse": float(np.sqrt(horizon_mse)), "mae": float(np.mean(np.abs(horizon_err)))}
             )
         payload["per_horizon"] = per_horizon
 
@@ -1334,10 +1332,7 @@ def _evaluate_generation(record: dict[str, Any]) -> Optional[dict[str, Any]]:
 
     bleu_scores = [_sentence_bleu(output, reference) for output, reference in zip(outputs, references)]
     rouge_scores = [_rouge_l_f1(output, reference) for output, reference in zip(outputs, references)]
-    metric_values = {
-        "bleu": float(np.mean(bleu_scores)),
-        "rouge_l": float(np.mean(rouge_scores)),
-    }
+    metric_values = {"bleu": float(np.mean(bleu_scores)), "rouge_l": float(np.mean(rouge_scores))}
 
     semantic_similarity = _paired_cosine_similarity(record.get("output_embeddings"), record.get("reference_embeddings"))
     if semantic_similarity is not None:
@@ -1409,10 +1404,7 @@ def _evaluate_reinforcement_learning(record: dict[str, Any]) -> Optional[dict[st
     return {
         "metric_values": metric_values,
         **metric_values,
-        "return_summary": {
-            "best_return": float(np.max(returns)),
-            "std_return": float(np.std(returns)),
-        },
+        "return_summary": {"best_return": float(np.max(returns)), "std_return": float(np.std(returns))},
     }
 
 
@@ -1451,7 +1443,9 @@ def _paired_cosine_similarity(left: Any, right: Any) -> Optional[float]:
         right_arr = right_arr[None, :]
     numerators = np.sum(left_arr * right_arr, axis=1)
     denominators = np.linalg.norm(left_arr, axis=1) * np.linalg.norm(right_arr, axis=1)
-    similarities = np.divide(numerators, denominators, out=np.zeros_like(numerators, dtype=float), where=denominators > 0)
+    similarities = np.divide(
+        numerators, denominators, out=np.zeros_like(numerators, dtype=float), where=denominators > 0
+    )
     return float(np.mean(similarities))
 
 

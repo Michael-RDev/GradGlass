@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import pytest
+from examples._example_output import repo_workspace_root
 from gradglass.server import create_app, start_server
 
 
@@ -52,10 +53,7 @@ def _load_example_module():
 
 def test_api_feature_coverage_example_exercises_every_endpoint(tmp_path):
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
     if probe.returncode != 0:
         pytest.skip("Torch is not importable in this environment; skipping API coverage example test.")
@@ -84,3 +82,24 @@ def test_api_feature_coverage_example_exercises_every_endpoint(tmp_path):
     assert names == EXPECTED_CHECKS
     assert all(row["ok"] for row in results), results
     assert len(list((workspace / "runs").iterdir())) >= 2
+
+
+def test_api_feature_coverage_main_prints_manual_serve_command(tmp_path, capsys):
+    probe = subprocess.run(
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+    )
+    if probe.returncode != 0:
+        pytest.skip("Torch is not importable in this environment; skipping API coverage example test.")
+
+    example = _load_example_module()
+    workspace = tmp_path / "api-coverage-main"
+    example.main(["--root", str(workspace), "--port", "8460"])
+    captured = capsys.readouterr().out
+
+    assert f"Workspace: {workspace}" in captured
+    assert f"Start dashboard: GRADGLASS_ROOT='{workspace}' gradglass serve --port 8460" in captured
+
+
+def test_api_feature_coverage_defaults_to_repo_workspace():
+    expected = Path(__file__).resolve().parents[1] / "gg_workspace"
+    assert repo_workspace_root() == expected

@@ -1,8 +1,6 @@
 from __future__ import annotations
 import json
 import os
-from pathlib import Path
-from typing import Any, Optional
 from gradglass.browser import open_url_detached
 from gradglass.run import Run
 from gradglass.artifacts import ArtifactStore
@@ -66,12 +64,7 @@ class GradGlass:
         from gradglass.analysis.data_monitor import DatasetMonitorBuilder
 
         return DatasetMonitorBuilder(
-            task=task,
-            dataset_name=dataset_name,
-            task_hint=task_hint,
-            config=config,
-            run_dir=run_dir,
-            run_id=run_id,
+            task=task, dataset_name=dataset_name, task_hint=task_hint, config=config, run_dir=run_dir, run_id=run_id
         )
 
     def test(self):
@@ -80,8 +73,9 @@ class GradGlass:
         return test_decorator
 
     def monitor(self, port=8432, open_browser=True):
-        from gradglass.server import create_app, start_server
+        from gradglass.server import create_app, ensure_dashboard_build_available, start_server
 
+        ensure_dashboard_build_available(workspace_root=self.store.root)
         app = create_app(self.store)
         actual_port = start_server(app, port=port)
         url = f"http://localhost:{actual_port}"

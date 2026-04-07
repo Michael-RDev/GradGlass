@@ -6,11 +6,10 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
-import numpy as np
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from gradglass._version import __version__
@@ -40,12 +39,7 @@ def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[l
     metric_rows = metrics if metrics is not None else store.get_metrics(run_id)
     runtime_state = store.get_runtime_state(run_id)
 
-    return build_overview_snapshot(
-        run_id=run_id,
-        metadata=meta,
-        metrics=metric_rows,
-        runtime_state=runtime_state,
-    )
+    return build_overview_snapshot(run_id=run_id, metadata=meta, metrics=metric_rows, runtime_state=runtime_state)
 
 
 def create_app(store):
@@ -122,19 +116,9 @@ def create_app(store):
 
         metrics = store.get_metrics(run_id)
         runtime_state = store.get_runtime_state(run_id)
-        overview = build_overview_snapshot(
-            run_id=run_id,
-            metadata=meta,
-            metrics=metrics,
-            runtime_state=runtime_state,
-        )
+        overview = build_overview_snapshot(run_id=run_id, metadata=meta, metrics=metrics, runtime_state=runtime_state)
         return build_alert_snapshot(
-            store,
-            run_id,
-            metadata=meta,
-            metrics=metrics,
-            runtime_state=runtime_state,
-            overview=overview,
+            store, run_id, metadata=meta, metrics=metrics, runtime_state=runtime_state, overview=overview
         )
 
     @app.get("/api/runs/{run_id}/checkpoints")
@@ -240,8 +224,6 @@ def create_app(store):
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
         summaries = store.get_gradient_summaries(run_id)
-        arch = store.get_architecture(run_id)
-
         layer_norms: dict[str, list[float]] = {}
         for entry in summaries:
             for layer, data in entry.get("layers", {}).items():
@@ -286,7 +268,7 @@ def create_app(store):
         for c in candidates[:8]:
             layer_path = c["layer"].replace(".", ".")
             pytorch_lines.append(f"# for param in model.{layer_path}.parameters():")
-            pytorch_lines.append(f"#     param.requires_grad_(False)")
+            pytorch_lines.append("#     param.requires_grad_(False)")
 
         pytorch_lines += [
             "",
@@ -471,13 +453,20 @@ def create_app(store):
                         }
                     )
                     break
-                if str((overview or {}).get("status") or "").strip().lower() in {"complete", "completed", "finished", "failed", "cancelled", "interrupted"}:
+                if str((overview or {}).get("status") or "").strip().lower() in {
+                    "complete",
+                    "completed",
+                    "finished",
+                    "failed",
+                    "cancelled",
+                    "interrupted",
+                }:
                     break
                 await asyncio.sleep(1.0)
         except WebSocketDisconnect:
             pass
 
-    dashboard_dir = Path(__file__).parent / "dashboard" / "dist"
+    dashboard_dir = get_dashboard_build_dir()
     if dashboard_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(dashboard_dir / "assets")), name="assets")
 
@@ -487,19 +476,12 @@ def create_app(store):
             if file_path.exists() and file_path.is_file():
                 return FileResponse(str(file_path))
             return FileResponse(str(dashboard_dir / "index.html"))
-    else:
-
-        @app.get("/")
-        async def dashboard_placeholder():
-            return HTMLResponse(
-                f'\n            <!DOCTYPE html>\n            <html>\n            <head><title>GradGlass</title></head>\n            <body style="font-family: system-ui; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; background:#0f172a; color:#e2e8f0;">\n                <div style="text-align:center">\n                    <h1>🔬 GradGlass v{__version__}</h1>\n                    <p>Dashboard build not found. API is running.</p>\n                    <p>Try: <code>GET /api/runs</code></p>\n                </div>\n            </body>\n            </html>\n            '
-            )
 
     return app
 
 
 def apply_mutation(draft, mutation):
-    layers = {l["id"]: l for l in draft.get("layers", [])}
+    layers = {layer["id"]: layer for layer in draft.get("layers", [])}
     edges = draft.get("edges", [])
     if mutation.operation == "freeze":
         if mutation.target_layer not in layers:
@@ -521,7 +503,7 @@ def apply_mutation(draft, mutation):
             for succ in successors:
                 new_edges.append([pred, succ])
         draft["edges"] = new_edges
-        draft["layers"] = [l for l in draft["layers"] if l["id"] != mutation.target_layer]
+        draft["layers"] = [layer for layer in draft["layers"] if layer["id"] != mutation.target_layer]
         return {"valid": True, "draft": draft, "message": f"Layer '{mutation.target_layer}' removed"}
     elif mutation.operation == "add":
         new_layer = {
@@ -564,6 +546,53 @@ def _wait_for_server(host: str, port: int, timeout: float = 10.0, interval: floa
     return False
 
 
+def get_dashboard_build_dir() -> Path:
+    return Path(__file__).parent / "dashboard" / "dist"
+
+
+def format_missing_dashboard_build_message(*, workspace_root: Optional[Path | str] = None) -> str:
+    workspace_text = f"\nWorkspace: {workspace_root}" if workspace_root is not None else ""
+    build_dir = get_dashboard_build_dir()
+    return (
+        f"GradGlass dashboard build not found at {build_dir}.{workspace_text}\n"
+        "Run your training script first, then view results with `gradglass serve`.\n"
+        "For live viewing during training, use `monitor=True`.\n"
+        "To restore the dashboard in a dev checkout, run "
+        "`npm --prefix gradglass/dashboard install && npm --prefix gradglass/dashboard run build`, "
+        "or use a packaged release that includes the built dashboard."
+    )
+
+
+def ensure_dashboard_build_available(*, workspace_root: Optional[Path | str] = None) -> Path:
+    dashboard_dir = get_dashboard_build_dir()
+    if (dashboard_dir / "index.html").exists():
+        return dashboard_dir
+    raise RuntimeError(format_missing_dashboard_build_message(workspace_root=workspace_root))
+
+
+def get_port_conflict(host: str, port: int) -> tuple[Optional[int], Optional[str]]:
+    if port in (None, 0):
+        return None, None
+    from gradglass.monitor_control import find_process_by_port
+
+    return find_process_by_port(int(port))
+
+
+def ensure_port_available(host: str, port: int) -> None:
+    if port in (None, 0):
+        return
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.25)
+        if probe.connect_ex((host, int(port))) == 0:
+            pid, command = get_port_conflict(host, int(port))
+            detail = f"Port {port} is already in use"
+            if pid is not None:
+                detail += f" by pid {pid}"
+            if command:
+                detail += f" ({command})"
+            raise RuntimeError(detail)
+
+
 def start_server(app, port=0):
     if port == 0:
         port = find_free_port()
@@ -576,28 +605,56 @@ def start_server(app, port=0):
 
 
 def start_server_blocking(app, port=8432, open_browser=True):
-    if open_browser:
-        schedule_url_open_detached(f"http://localhost:{port}", delay_s=1.5, force_reload=True)
-    print(f"🔬 GradGlass server running at http://localhost:{port}")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    host = "127.0.0.1"
+    workspace_root = getattr(getattr(app, "state", None), "store", None)
+    workspace_root = getattr(workspace_root, "root", None)
+    ensure_dashboard_build_available(workspace_root=workspace_root)
+    ensure_port_available(host, port)
+
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    announced = threading.Event()
+
+    def _announce_when_ready():
+        while not server.started and not server.should_exit:
+            time.sleep(0.05)
+        if server.started:
+            if open_browser:
+                schedule_url_open_detached(f"http://localhost:{port}", delay_s=0.0, force_reload=True)
+            if workspace_root is not None:
+                print(f"Workspace: {workspace_root}")
+            print(f"🔬 GradGlass server running at http://localhost:{port}")
+            announced.set()
+
+    threading.Thread(target=_announce_when_ready, daemon=True).start()
+    server.run()
+    if server.started and not announced.is_set():
+        if open_browser:
+            schedule_url_open_detached(f"http://localhost:{port}", delay_s=0.0, force_reload=True)
+        if workspace_root is not None:
+            print(f"Workspace: {workspace_root}")
+        print(f"🔬 GradGlass server running at http://localhost:{port}")
 
 
 def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the GradGlass dashboard server.")
-    parser.add_argument("--root", default=None, help="Artifact store root. Defaults to ./gg_workspace in the current directory.")
+    parser.add_argument(
+        "--root", default=None, help="Artifact store root. Defaults to ./gg_workspace in the current directory."
+    )
     parser.add_argument("--port", type=int, default=8432, help="Port to bind the GradGlass dashboard server.")
     parser.add_argument(
-        "--open-browser",
-        action="store_true",
-        help="Open the dashboard URL in a browser after the server starts.",
+        "--open-browser", action="store_true", help="Open the dashboard URL in a browser after the server starts."
     )
     args = parser.parse_args()
 
     store = ArtifactStore(root=args.root)
     app = create_app(store)
-    start_server_blocking(app, port=args.port, open_browser=args.open_browser)
+    try:
+        start_server_blocking(app, port=args.port, open_browser=args.open_browser)
+    except RuntimeError as exc:
+        parser.exit(1, f"{exc}\n")
 
 
 if __name__ == "__main__":

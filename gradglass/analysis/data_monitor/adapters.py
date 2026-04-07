@@ -77,7 +77,9 @@ def _build_from_array_like(data: Any, labels: Any, limit: int) -> AdaptedDataset
     label_array = _to_numpy(labels) if labels is not None else None
     total_count = _safe_len(array)
     if total_count is None:
-        return AdaptedDataset(records=[], total_count=None, source_type=type(data).__name__, errors=["Unsupported array-like input"])
+        return AdaptedDataset(
+            records=[], total_count=None, source_type=type(data).__name__, errors=["Unsupported array-like input"]
+        )
     records = []
     for index in range(min(total_count, limit)):
         label = None
@@ -135,7 +137,9 @@ def _iter_dataset(dataset: Any, limit: int) -> AdaptedDataset:
     records = []
     errors = []
     if total_count is None:
-        return AdaptedDataset(records=[], total_count=None, source_type=type(dataset).__name__, errors=["Dataset length unavailable"])
+        return AdaptedDataset(
+            records=[], total_count=None, source_type=type(dataset).__name__, errors=["Dataset length unavailable"]
+        )
     for index in range(min(total_count, limit)):
         try:
             item = dataset[index]

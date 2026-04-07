@@ -154,7 +154,9 @@ class DatasetMonitorBuilder:
                 parent_stage=capture.parent_stage,
                 sample_count=total_count,
                 observed_sample_count=len(observations),
-                null_missing_rate=round(float(sum(missing_rates) / max(len(missing_rates), 1)), 6) if observations else None,
+                null_missing_rate=round(float(sum(missing_rates) / max(len(missing_rates), 1)), 6)
+                if observations
+                else None,
                 label_availability="available"
                 if label_available == len(observations) and observations
                 else ("partial" if label_available else "missing"),
@@ -186,10 +188,7 @@ class DatasetMonitorBuilder:
         return enrich_stage_snapshots(records)
 
     def _build_dashboard(
-        self,
-        report: DatasetMonitorReport,
-        stage_records: list[StageRecord],
-        latest_by_split: dict[str, StageRecord],
+        self, report: DatasetMonitorReport, stage_records: list[StageRecord], latest_by_split: dict[str, StageRecord]
     ) -> DashboardViewModel:
         checks = report.checks
         stage_cards = []
@@ -376,7 +375,9 @@ class DatasetMonitorBuilder:
             lines.append(f"Dataset: {report.metadata.dataset_name}")
         lines.append(f"Recorded stages: {report.metadata.recorded_stage_count}")
         lines.append(f"Available splits: {', '.join(report.metadata.available_splits) or '-'}")
-        lines.append(f"Available modalities: {', '.join(modality.value for modality in report.metadata.available_modalities) or '-'}")
+        lines.append(
+            f"Available modalities: {', '.join(modality.value for modality in report.metadata.available_modalities) or '-'}"
+        )
         lines.append("")
         lines.append("Pipeline")
         lines.append("-" * 60)
@@ -385,7 +386,9 @@ class DatasetMonitorBuilder:
             split = snapshot["split"]
             status = snapshot["status"]
             sample_count = snapshot.get("sample_count")
-            lines.append(f"{stage_name:<24} {split:<12} status={status:<8} sample_count={sample_count if sample_count is not None else '-'}")
+            lines.append(
+                f"{stage_name:<24} {split:<12} status={status:<8} sample_count={sample_count if sample_count is not None else '-'}"
+            )
         lines.append("")
         lines.append("Checks")
         lines.append("-" * 60)
@@ -438,11 +441,17 @@ class DatasetMonitorBuilder:
             aggregate_classes = {}
             for slice_model in latest_slices.values():
                 for modality, proportion in slice_model.modality_proportions.items():
-                    aggregate_modalities[modality] = aggregate_modalities.get(modality, 0.0) + proportion * slice_model.sample_count
+                    aggregate_modalities[modality] = (
+                        aggregate_modalities.get(modality, 0.0) + proportion * slice_model.sample_count
+                    )
                 for label, proportion in slice_model.class_distribution.items():
                     aggregate_classes[label] = aggregate_classes.get(label, 0.0) + proportion * slice_model.sample_count
-            overall_slice.modality_proportions = {key: round(value / total_samples, 4) for key, value in aggregate_modalities.items()}
-            overall_slice.class_distribution = {key: round(value / total_samples, 4) for key, value in aggregate_classes.items()}
+            overall_slice.modality_proportions = {
+                key: round(value / total_samples, 4) for key, value in aggregate_modalities.items()
+            }
+            overall_slice.class_distribution = {
+                key: round(value / total_samples, 4) for key, value in aggregate_classes.items()
+            }
 
         checks = run_leakage_checks(stage_records, self.task, self.config)
         recommendations = build_recommendations(checks, self.config)
@@ -453,7 +462,11 @@ class DatasetMonitorBuilder:
             task_hint=self.task_hint,
             available_splits=sorted(latest_by_split.keys()),
             available_modalities=sorted(
-                {detect_modality(obs.sample, task=self.task, task_hint=self.task_hint) for record in stage_records for obs in record.observations},
+                {
+                    detect_modality(obs.sample, task=self.task, task_hint=self.task_hint)
+                    for record in stage_records
+                    for obs in record.observations
+                },
                 key=lambda item: item.value,
             ),
             recorded_stage_count=len(stage_records),
@@ -474,11 +487,7 @@ class DatasetMonitorBuilder:
                 "stage_order": [stage.value for stage in PIPELINE_STAGE_ORDER],
                 "snapshots": [record.snapshot.model_dump(mode="json") for record in stage_records],
             },
-            composition=CompositionSummary(
-                overall=overall_slice,
-                latest_by_split=latest_slices,
-                slices=slices,
-            ),
+            composition=CompositionSummary(overall=overall_slice, latest_by_split=latest_slices, slices=slices),
             split_comparisons=build_split_comparisons(latest_by_split, self.config),
             checks=checks,
             recommendations=recommendations,

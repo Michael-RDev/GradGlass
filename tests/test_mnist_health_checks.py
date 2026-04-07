@@ -15,7 +15,9 @@ TEST_INDICES = list(range(128))
 CLEAN_POOL = 400
 
 
-def _variance_filtered(train_x: np.ndarray, test_x: np.ndarray, *, min_std: float = 1e-3) -> tuple[np.ndarray, np.ndarray]:
+def _variance_filtered(
+    train_x: np.ndarray, test_x: np.ndarray, *, min_std: float = 1e-3
+) -> tuple[np.ndarray, np.ndarray]:
     train_std = np.std(train_x, axis=0)
     test_std = np.std(test_x, axis=0)
     keep = (train_std > min_std) | (test_std > min_std)
@@ -117,12 +119,7 @@ def test_mnist_combined_standardization_triggers_preprocessing_leakage():
 
     report = project_monitor_report_to_legacy(
         build_monitor_report_for_arrays(
-            train_scaled,
-            train_y,
-            test_scaled,
-            test_y,
-            dataset_name="MNIST Combined Stats",
-            save=False,
+            train_scaled, train_y, test_scaled, test_y, dataset_name="MNIST Combined Stats", save=False
         )
     )
 
@@ -137,12 +134,7 @@ def test_mnist_train_only_standardization_does_not_trigger_preprocessing_leakage
 
     report = project_monitor_report_to_legacy(
         build_monitor_report_for_arrays(
-            train_scaled,
-            train_y,
-            test_scaled,
-            test_y,
-            dataset_name="MNIST Train Stats",
-            save=False,
+            train_scaled, train_y, test_scaled, test_y, dataset_name="MNIST Train Stats", save=False
         )
     )
 

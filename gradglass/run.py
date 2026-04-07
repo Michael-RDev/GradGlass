@@ -13,7 +13,7 @@ from gradglass.browser import open_url_detached, resolve_open_browser_preference
 from gradglass.experiment_tracking import infer_total_steps_from_config
 
 if TYPE_CHECKING:
-    from gradglass.artifacts import ArtifactStore
+    pass
 
 _UNSET = object()
 
@@ -373,7 +373,7 @@ class Run:
     def _start_persistent_dashboard_server(self, port: int = 0) -> int:
         import subprocess
         import sys
-        from gradglass.server import _wait_for_server, find_free_port
+        from gradglass.server import _wait_for_server, ensure_dashboard_build_available, find_free_port
 
         if self.server_process is not None and self.server_process.poll() is None and self.server_port is not None:
             self._write_runtime_state(
@@ -387,6 +387,7 @@ class Run:
             )
             return self.server_port
 
+        ensure_dashboard_build_available(workspace_root=self.store.root)
         actual_port = port or find_free_port()
         cmd = [sys.executable, "-m", "gradglass.server", "--root", str(self.store.root), "--port", str(actual_port)]
         process = subprocess.Popen(
@@ -677,8 +678,9 @@ class Run:
 
     def open(self):
         import uvicorn
-        from gradglass.server import create_app, find_free_port
+        from gradglass.server import create_app, ensure_dashboard_build_available, find_free_port
 
+        ensure_dashboard_build_available(workspace_root=self.store.root)
         app = create_app(self.store)
         port = find_free_port()
         url = self._dashboard_run_url(port)
@@ -792,7 +794,6 @@ class Run:
         return report
 
     def check_leakage_from_loaders(self, train_loader, test_loader, max_samples=2000, print_summary=True):
-        import numpy as np
 
         try:
             import torch

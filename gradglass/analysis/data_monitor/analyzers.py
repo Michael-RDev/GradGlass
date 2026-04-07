@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import itertools
-import math
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -126,13 +125,12 @@ def _collect_schema_summary(observations: list[SampleObservation]) -> dict[str, 
     field_counter = Counter()
     for obs in observations:
         field_counter.update(obs.schema_fields)
-    return {
-        "fields": sorted(field_counter.keys()),
-        "field_counts": dict(field_counter),
-    }
+    return {"fields": sorted(field_counter.keys()), "field_counts": dict(field_counter)}
 
 
-def _compute_snapshot_status(snapshot: PipelineStageSnapshot, observations: list[SampleObservation], adapter_errors: list[str]) -> CheckStatus:
+def _compute_snapshot_status(
+    snapshot: PipelineStageSnapshot, observations: list[SampleObservation], adapter_errors: list[str]
+) -> CheckStatus:
     if adapter_errors:
         return CheckStatus.WARNING if observations else CheckStatus.UNKNOWN
     if snapshot.sample_count == 0 or (snapshot.observed_sample_count == 0 and snapshot.sample_count not in (0, None)):
@@ -205,12 +203,12 @@ def build_composition_slice(
     image_heights = [int(obs.metrics["image_height"]) for obs in observations if "image_height" in obs.metrics]
     image_widths = [int(obs.metrics["image_width"]) for obs in observations if "image_width" in obs.metrics]
     image_aspects = [
-        float(obs.metrics["aspect_ratio"])
-        for obs in observations
-        if obs.metrics.get("aspect_ratio") is not None
+        float(obs.metrics["aspect_ratio"]) for obs in observations if obs.metrics.get("aspect_ratio") is not None
     ]
     audio_durations = [float(obs.metrics["duration_s"]) for obs in observations if "duration_s" in obs.metrics]
-    audio_sample_rates = Counter(str(obs.metrics.get("sample_rate")) for obs in observations if obs.metrics.get("sample_rate"))
+    audio_sample_rates = Counter(
+        str(obs.metrics.get("sample_rate")) for obs in observations if obs.metrics.get("sample_rate")
+    )
     missing_rates = [obs.missing_rate for obs in observations]
 
     field_missing_counter = Counter()
@@ -289,20 +287,21 @@ def build_composition_slice(
         },
         categorical_cardinality={key: len(value) for key, value in sorted(categorical_values.items())},
         numerical_feature_stats=numerical_feature_stats,
-        provenance={key: round(value / max(sum(provenance_counts.values()), 1), 4) for key, value in provenance_counts.items()},
+        provenance={
+            key: round(value / max(sum(provenance_counts.values()), 1), 4) for key, value in provenance_counts.items()
+        },
         outlier_features=outlier_features[: config.top_feature_limit],
     )
 
 
 def build_split_comparisons(
-    latest_by_split: dict[str, StageRecord],
-    config: DatasetMonitorConfig,
+    latest_by_split: dict[str, StageRecord], config: DatasetMonitorConfig
 ) -> list[SplitComparisonSummary]:
     split_names = list(latest_by_split)
     if len(split_names) < 2:
         return []
     if "train" in latest_by_split:
-        pairs = [( "train", split_name) for split_name in split_names if split_name != "train"]
+        pairs = [("train", split_name) for split_name in split_names if split_name != "train"]
     else:
         pairs = list(itertools.combinations(split_names, 2))
     results = []
@@ -347,7 +346,9 @@ def build_split_comparisons(
         modality_a = record_a.snapshot.modality_metadata.get("modality_proportions", {})
         modality_b = record_b.snapshot.modality_metadata.get("modality_proportions", {})
         modality_keys = sorted(set(modality_a) | set(modality_b))
-        modality_diff = {key: round(abs(modality_a.get(key, 0.0) - modality_b.get(key, 0.0)), 4) for key in modality_keys}
+        modality_diff = {
+            key: round(abs(modality_a.get(key, 0.0) - modality_b.get(key, 0.0)), 4) for key in modality_keys
+        }
         summary_parts = []
         if label_diff:
             summary_parts.append(f"max label diff {_safe_round(max(label_diff.values()), 4)}")
@@ -426,7 +427,9 @@ def _duplicate_groups(observations: list[SampleObservation], *, normalized: bool
     return {key: indices for key, indices in groups.items() if len(indices) > 1}
 
 
-def _group_labels_for_distribution(observations: list[SampleObservation], bins: int) -> tuple[dict[str, float], dict[str, Any]]:
+def _group_labels_for_distribution(
+    observations: list[SampleObservation], bins: int
+) -> tuple[dict[str, float], dict[str, Any]]:
     labels = _flatten_labels(observations)
     if not labels:
         return {}, {}
@@ -460,23 +463,39 @@ def _numeric_labels(observations: list[SampleObservation]) -> np.ndarray:
 
 
 def run_leakage_checks(
-    records: list[StageRecord],
-    task: TaskType,
-    config: DatasetMonitorConfig,
+    records: list[StageRecord], task: TaskType, config: DatasetMonitorConfig
 ) -> list[MonitorCheckResult]:
     latest = _latest_by_split(records)
     train = latest.get("train")
     test = latest.get("test")
     if train is None or test is None:
         return [
-            _unknown_check("Train/test exact-sample overlap", CheckSeverity.CRITICAL, "Train or test split is unavailable."),
-            _unknown_check("Duplicate samples within training set", CheckSeverity.MEDIUM, "Training split is unavailable."),
+            _unknown_check(
+                "Train/test exact-sample overlap", CheckSeverity.CRITICAL, "Train or test split is unavailable."
+            ),
+            _unknown_check(
+                "Duplicate samples within training set", CheckSeverity.MEDIUM, "Training split is unavailable."
+            ),
             _unknown_check("Duplicate samples within test set", CheckSeverity.MEDIUM, "Test split is unavailable."),
-            _unknown_check("Train/test near-duplicate samples", CheckSeverity.HIGH, "Train or test split is unavailable."),
-            _unknown_check("Train/test label-distribution consistency", CheckSeverity.MEDIUM, "Train or test labels are unavailable."),
-            _unknown_check("Train/test feature-statistics consistency", CheckSeverity.MEDIUM, "Comparable numeric features are unavailable."),
-            _unknown_check("Feature-target correlation check", CheckSeverity.HIGH, "Labels or numeric features are unavailable."),
-            _unknown_check("Preprocessing / scaler leakage", CheckSeverity.HIGH, "Comparable numeric features are unavailable."),
+            _unknown_check(
+                "Train/test near-duplicate samples", CheckSeverity.HIGH, "Train or test split is unavailable."
+            ),
+            _unknown_check(
+                "Train/test label-distribution consistency",
+                CheckSeverity.MEDIUM,
+                "Train or test labels are unavailable.",
+            ),
+            _unknown_check(
+                "Train/test feature-statistics consistency",
+                CheckSeverity.MEDIUM,
+                "Comparable numeric features are unavailable.",
+            ),
+            _unknown_check(
+                "Feature-target correlation check", CheckSeverity.HIGH, "Labels or numeric features are unavailable."
+            ),
+            _unknown_check(
+                "Preprocessing / scaler leakage", CheckSeverity.HIGH, "Comparable numeric features are unavailable."
+            ),
         ]
 
     checks: list[MonitorCheckResult] = []
@@ -523,7 +542,11 @@ def run_leakage_checks(
             summary="Training split has no exact duplicate groups."
             if not train_dups
             else f"Training split contains {len(train_dups)} duplicate groups and {train_extra} extra copies.",
-            payload={"num_duplicate_groups": len(train_dups), "total_extra_copies": train_extra, "train_size": len(train.observations)},
+            payload={
+                "num_duplicate_groups": len(train_dups),
+                "total_extra_copies": train_extra,
+                "train_size": len(train.observations),
+            },
             recommendation="Deduplicate training samples or down-weight repeated records to reduce training bias."
             if train_dups
             else None,
@@ -544,7 +567,11 @@ def run_leakage_checks(
             summary="Test split has no exact duplicate groups."
             if not test_dups
             else f"Test split contains {len(test_dups)} duplicate groups and {test_extra} extra copies.",
-            payload={"num_duplicate_groups": len(test_dups), "total_extra_copies": test_extra, "test_size": len(test.observations)},
+            payload={
+                "num_duplicate_groups": len(test_dups),
+                "total_extra_copies": test_extra,
+                "test_size": len(test.observations),
+            },
             recommendation="Deduplicate evaluation samples to avoid overweighting repeated examples."
             if test_dups
             else None,
@@ -577,7 +604,10 @@ def run_leakage_checks(
                 break
             candidates_seen += 1
             similarity = cosine_similarity(candidate.approximate_signature, obs.approximate_signature)
-            if similarity >= config.near_duplicate_similarity_threshold and candidate.exact_fingerprint != obs.exact_fingerprint:
+            if (
+                similarity >= config.near_duplicate_similarity_threshold
+                and candidate.exact_fingerprint != obs.exact_fingerprint
+            ):
                 near_pairs.append(
                     {
                         "train_index": candidate.index,
@@ -618,7 +648,13 @@ def run_leakage_checks(
     train_dist, train_reg_hist = _group_labels_for_distribution(train.observations, config.histogram_bins)
     test_dist, test_reg_hist = _group_labels_for_distribution(test.observations, config.histogram_bins)
     if not train_dist and not test_dist and not train_reg_hist and not test_reg_hist:
-        checks.append(_unknown_check("Train/test label-distribution consistency", CheckSeverity.MEDIUM, "Train or test labels are unavailable."))
+        checks.append(
+            _unknown_check(
+                "Train/test label-distribution consistency",
+                CheckSeverity.MEDIUM,
+                "Train or test labels are unavailable.",
+            )
+        )
     else:
         labels = sorted(set(train_dist) | set(test_dist))
         diffs = {label: round(abs(train_dist.get(label, 0.0) - test_dist.get(label, 0.0)), 4) for label in labels}
@@ -643,7 +679,12 @@ def run_leakage_checks(
                 recommendation="Revisit split strategy or stratification if evaluation is meant to mirror training distribution."
                 if warn
                 else None,
-                evidence=[{"label": label, "absolute_diff": diff} for label, diff in sorted(diffs.items(), key=lambda item: item[1], reverse=True)[: config.top_feature_limit]],
+                evidence=[
+                    {"label": label, "absolute_diff": diff}
+                    for label, diff in sorted(diffs.items(), key=lambda item: item[1], reverse=True)[
+                        : config.top_feature_limit
+                    ]
+                ],
                 duration_ms=(time.time() - start) * 1000,
             )
         )
@@ -653,7 +694,13 @@ def run_leakage_checks(
     test_feature_names, test_matrix = _collect_numeric_matrix(test.observations)
     common_feature_names = [name for name in train_feature_names if name in set(test_feature_names)]
     if not common_feature_names:
-        checks.append(_unknown_check("Train/test feature-statistics consistency", CheckSeverity.MEDIUM, "Comparable numeric features are unavailable."))
+        checks.append(
+            _unknown_check(
+                "Train/test feature-statistics consistency",
+                CheckSeverity.MEDIUM,
+                "Comparable numeric features are unavailable.",
+            )
+        )
     else:
         idx_train = {name: train_feature_names.index(name) for name in common_feature_names}
         idx_test = {name: test_feature_names.index(name) for name in common_feature_names}
@@ -711,7 +758,11 @@ def run_leakage_checks(
     feature_names, feature_matrix = _collect_numeric_matrix(combined_observations)
     numeric_labels = _numeric_labels(combined_observations)
     if not feature_names or feature_matrix.shape[0] == 0 or numeric_labels.size == 0:
-        checks.append(_unknown_check("Feature-target correlation check", CheckSeverity.HIGH, "Labels or numeric features are unavailable."))
+        checks.append(
+            _unknown_check(
+                "Feature-target correlation check", CheckSeverity.HIGH, "Labels or numeric features are unavailable."
+            )
+        )
     else:
         usable_rows = min(feature_matrix.shape[0], numeric_labels.size)
         feature_matrix = feature_matrix[:usable_rows]
@@ -773,7 +824,11 @@ def run_leakage_checks(
 
     start = time.time()
     if not common_feature_names:
-        checks.append(_unknown_check("Preprocessing / scaler leakage", CheckSeverity.HIGH, "Comparable numeric features are unavailable."))
+        checks.append(
+            _unknown_check(
+                "Preprocessing / scaler leakage", CheckSeverity.HIGH, "Comparable numeric features are unavailable."
+            )
+        )
     else:
         idx_train = {name: train_feature_names.index(name) for name in common_feature_names}
         idx_test = {name: test_feature_names.index(name) for name in common_feature_names}
@@ -785,10 +840,17 @@ def run_leakage_checks(
         avg_train_mean_abs = float(np.nanmean(np.abs(train_mean)))
         avg_train_std_diff = float(np.nanmean(np.abs(train_std - 1.0)))
         avg_test_mean_abs = float(np.nanmean(np.abs(test_mean)))
-        combined_mean = (len(train_subset) * train_mean + len(test_subset) * test_mean) / max(len(train_subset) + len(test_subset), 1)
+        combined_mean = (len(train_subset) * train_mean + len(test_subset) * test_mean) / max(
+            len(train_subset) + len(test_subset), 1
+        )
         avg_combined_abs = float(np.nanmean(np.abs(combined_mean)))
         train_looks_standardized = avg_train_mean_abs < 0.15 and avg_train_std_diff < 0.15
-        leakage = bool(train_looks_standardized and avg_train_mean_abs >= 1e-4 and avg_test_mean_abs < 0.15 and avg_combined_abs < 0.05)
+        leakage = bool(
+            train_looks_standardized
+            and avg_train_mean_abs >= 1e-4
+            and avg_test_mean_abs < 0.15
+            and avg_combined_abs < 0.05
+        )
         status = CheckStatus.FAILED if leakage else CheckStatus.PASSED
         if not train_looks_standardized:
             status = CheckStatus.PASSED
@@ -796,7 +858,9 @@ def run_leakage_checks(
         recommendation = None
         if leakage:
             summary = "Train and test splits appear to have been standardized using combined statistics."
-            recommendation = "Fit normalization and scaling only on the training split, then transform validation/test separately."
+            recommendation = (
+                "Fit normalization and scaling only on the training split, then transform validation/test separately."
+            )
         elif not train_looks_standardized:
             summary = "Standardization heuristics were not applicable for this stage."
         checks.append(
@@ -844,7 +908,12 @@ def build_recommendations(checks: list[MonitorCheckResult], config: DatasetMonit
             value = check.payload.get(key)
             if isinstance(value, int):
                 sample_volume += value
-        score = severity_weight[check.severity] * 10.0 + confidence * 5.0 + min(evidence_volume, config.evidence_limit) * 0.05 + min(sample_volume, 5000) / 5000.0
+        score = (
+            severity_weight[check.severity] * 10.0
+            + confidence * 5.0
+            + min(evidence_volume, config.evidence_limit) * 0.05
+            + min(sample_volume, 5000) / 5000.0
+        )
         recommendations.append(
             RecommendationItem(
                 title=check.name,

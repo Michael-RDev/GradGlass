@@ -63,15 +63,16 @@ def build_lime_samples(feature_names: list[str], values: np.ndarray) -> list[dic
                 "prediction": "positive" if np.sum(row) >= 0 else "negative",
                 "probability": float(min(0.99, max(0.51, 0.65 + 0.05 * index))),
                 "explanation": [
-                    {"feature": feature_names[int(idx)], "weight": float(round(row[int(idx)], 6))}
-                    for idx in ranked
+                    {"feature": feature_names[int(idx)], "weight": float(round(row[int(idx)], 6))} for idx in ranked
                 ],
             }
         )
     return samples
 
 
-def evaluate_model(model: nn.Module, x: torch.Tensor, y: torch.Tensor, criterion: nn.Module) -> tuple[torch.Tensor, float, float]:
+def evaluate_model(
+    model: nn.Module, x: torch.Tensor, y: torch.Tensor, criterion: nn.Module
+) -> tuple[torch.Tensor, float, float]:
     model.eval()
     with torch.no_grad():
         logits = model(x)
@@ -108,13 +109,7 @@ def build_tabular_run(
     run = gg.run(name=name, task="classification", monitor=False)
     run.checkpoint_every(1)
     run.watch(
-        model,
-        optimizer=optimizer,
-        activations="auto",
-        gradients="summary",
-        saliency="auto",
-        every=1,
-        probe_examples=16,
+        model, optimizer=optimizer, activations="auto", gradients="summary", saliency="auto", every=1, probe_examples=16
     )
 
     for _epoch in range(epochs):
@@ -154,12 +149,7 @@ def build_tabular_run(
             centered_inputs = eval_slice - np.mean(background, axis=0, keepdims=True)
             shap_values = centered_inputs * probs.reshape(-1, 1)
 
-        run.log_shap(
-            FEATURE_NAMES,
-            shap_values,
-            message=f"{name} SHAP summary.",
-            top_k=len(FEATURE_NAMES),
-        )
+        run.log_shap(FEATURE_NAMES, shap_values, message=f"{name} SHAP summary.", top_k=len(FEATURE_NAMES))
 
         shap_scores = run.store.get_shap(run.run_id)["summary_plot"]
         lime_weights = np.array([item["mean_shap"] for item in shap_scores], dtype=np.float64)
@@ -225,12 +215,7 @@ def degrade_run_for_showcase(run, *, val_x: torch.Tensor, val_y: torch.Tensor, f
     bad_logits[torch.arange(16), bad_targets] = 6.5
 
     for offset, (loss, acc, val_loss, val_acc) in enumerate(
-        [
-            (0.92, 0.69, 1.08, 0.58),
-            (1.37, 0.54, 1.82, 0.42),
-            (1.81, 0.48, 2.24, 0.31),
-        ],
-        start=1,
+        [(0.92, 0.69, 1.08, 0.58), (1.37, 0.54, 1.82, 0.42), (1.81, 0.48, 2.24, 0.31)], start=1
     ):
         run.log(loss=loss, acc=acc, val_loss=val_loss, val_acc=val_acc, error_rate=1.0 - val_acc, lr=0.02 * offset)
         run.log_batch(x=val_x[:16], y=val_y[:16], y_pred=bad_logits, loss=val_loss)
