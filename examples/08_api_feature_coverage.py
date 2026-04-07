@@ -20,8 +20,9 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from gradglass import gg
 from gradglass.analysis.data_monitor import PipelineStage
-from gradglass.artifacts import ArtifactStore, resolve_default_root
+from gradglass.artifacts import ArtifactStore
 from gradglass.server import find_free_port
+from _example_output import repo_workspace_root, serve_command_for_workspace
 
 
 FEATURE_NAMES = ["signal_a", "signal_b", "signal_c", "interaction", "noise_a", "noise_b"]
@@ -484,11 +485,20 @@ def main():
         help="Workspace root for generated artifacts. Defaults to ./gg_workspace beside this example.",
     )
     parser.add_argument("--port", type=int, default=8432, help="Port for the GradGlass server.")
+    parser.add_argument("--serve", action="store_true", help="Start the GradGlass dashboard server after generating coverage runs.")
     parser.add_argument("--open-browser", action="store_true", help="Open the dashboard in a browser.")
     args = parser.parse_args()
 
-    root = Path(args.root).resolve() if args.root else resolve_default_root(entrypoint=__file__)
+    root = Path(args.root).resolve() if args.root else repo_workspace_root()
     bundle = create_runs_for_coverage(root)
+    print(f"\nWorkspace: {root}")
+    if not args.serve:
+        print(f"Start dashboard: {serve_command_for_workspace(root, port=args.port)}")
+        print("If port 8432 is already occupied, stop the old server with: gradglass stop --port 8432")
+        print("Run this example with --serve if you want it to launch and exercise the API automatically.")
+        bundle["coverage_run"].finish(open=False, analyze=False)
+        return
+
     chosen_port, port_note = resolve_server_port(args.port)
     if port_note:
         print(port_note)
@@ -504,7 +514,6 @@ def main():
     )
     bundle["coverage_run"].finish(open=False, analyze=False)
     print_coverage_table(results)
-    print(f"\nWorkspace: {root}")
     print(f"Dashboard: {base_url}")
 
 

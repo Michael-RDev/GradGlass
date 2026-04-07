@@ -2,9 +2,10 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from gradglass import gg
 from gradglass.analysis.leakage import run_leakage_detection
+from _example_output import print_dashboard_next_steps, repo_workspace_root
 
 def main():
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
     
     # Generate some dummy data representing a potential leak overlap
     # We purposefully add 50 identical samples to both train and test to trigger a leakage warning.
@@ -46,6 +47,7 @@ def main():
     # run.check_leakage(train_x, train_y, test_x, test_y)
 
     print("Finished.")
+    print_dashboard_next_steps(gg.store.root)
 
 if __name__ == "__main__":
     main()

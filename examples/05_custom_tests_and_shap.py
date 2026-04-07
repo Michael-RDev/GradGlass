@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from gradglass import gg
 from gradglass.analysis.registry import test, TestCategory, TestContext, TestResult, TestSeverity, TestStatus
 
+from _example_output import print_dashboard_next_steps, repo_workspace_root
+
 
 FEATURE_NAMES = [
     "dominant_signal",
@@ -117,7 +119,7 @@ def main():
     except ImportError as exc:
         raise RuntimeError("Install explainability dependencies with `pip install -e .[torch,explainability]`.") from exc
 
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
 
     train_x, train_y, val_x, val_y = make_dataset()
     train_loader = DataLoader(TensorDataset(train_x, train_y), batch_size=32, shuffle=True)
@@ -194,6 +196,7 @@ def main():
     print("Running GradGlass analysis with built-ins + custom SHAP dominance test...")
     run.analyze(print_summary=True)
     run.finish(open=False, analyze=False)
+    print_dashboard_next_steps(gg.store.root)
 
 
 if __name__ == "__main__":

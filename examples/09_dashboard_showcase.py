@@ -10,13 +10,13 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from gradglass.artifacts import resolve_default_root
 from gradglass.run import Run
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
+from _example_output import repo_workspace_root, serve_command_for_workspace
 from _showcase_support import (
     build_tabular_run,
     configure_store,
@@ -134,17 +134,44 @@ def print_guided_tour(base_url: str, runs: dict[str, Run]) -> None:
         print(f"  - {label:<24} {url}")
 
 
-def launch_showcase(root: Path, *, port: int = 8432, open_browser: bool = True, keep_existing: bool = False) -> dict[str, Any]:
-    bundle = create_showcase_runs(root, keep_existing=keep_existing)
-    chosen_port, port_note = resolve_server_port(port)
-    if port_note:
-        print(port_note)
+def build_manual_serve_command(root: Path, port: int) -> str:
+    return serve_command_for_workspace(root, port=port)
 
-    dashboard_port = bundle["runs"]["primary"].serve(port=chosen_port, open_browser=open_browser)
-    base_url = f"http://127.0.0.1:{dashboard_port}"
-    print_guided_tour(base_url, bundle["runs"])
+
+def launch_showcase(
+    root: Path,
+    *,
+    port: int = 8432,
+    serve_dashboard: bool = False,
+    open_browser: bool = True,
+    keep_existing: bool = False,
+) -> dict[str, Any]:
+    bundle = create_showcase_runs(root, keep_existing=keep_existing)
+    dashboard_port = None
+    base_url = None
+    chosen_port, port_note = port, None
+
+    if serve_dashboard:
+        chosen_port, port_note = resolve_server_port(port)
+        if port_note:
+            print(port_note)
+        dashboard_port = bundle["runs"]["primary"].serve(port=chosen_port, open_browser=open_browser)
+        base_url = f"http://127.0.0.1:{dashboard_port}"
+        print_guided_tour(base_url, bundle["runs"])
+    else:
+        print("\nDashboard Showcase (Synthetic Multi-Run Demo)")
+        print("=" * 72)
+        print("Runs:")
+        for label, run in bundle["runs"].items():
+            print(f"  - {label:<8} {run.run_id}")
+
     print(f"\nWorkspace: {root}")
-    print(f"Dashboard: {base_url}")
+    if base_url is not None:
+        print(f"Dashboard: {base_url}")
+    else:
+        print("This example generates a synthetic dashboard fixture workspace rather than a single real training loop.")
+        print(f"Start dashboard: {build_manual_serve_command(root, port)}")
+        print("If port 8432 is already occupied, stop the old server with: gradglass stop --port 8432")
     return {
         "store": bundle["store"],
         "runs": bundle["runs"],
@@ -164,8 +191,9 @@ def parse_args(argv: list[str] | None = None):
         help="Workspace root for generated artifacts. Defaults to ./gg_workspace beside this example.",
     )
     parser.add_argument("--port", type=int, default=8432, help="Requested port for the GradGlass server.")
+    parser.add_argument("--serve", action="store_true", help="Start the GradGlass dashboard server after generating the showcase workspace.")
     parser.add_argument("--keep-existing", action="store_true", help="Reuse the latest showcase runs if they already exist in this workspace.")
-    parser.set_defaults(open_browser=True)
+    parser.set_defaults(open_browser=False)
     parser.add_argument("--open-browser", dest="open_browser", action="store_true", help="Open the dashboard in a browser.")
     parser.add_argument("--no-browser", dest="open_browser", action="store_false", help="Do not open the dashboard in a browser.")
     return parser.parse_args(argv)
@@ -173,8 +201,14 @@ def parse_args(argv: list[str] | None = None):
 
 def main(argv: list[str] | None = None):
     args = parse_args(argv)
-    root = Path(args.root).resolve() if args.root else resolve_default_root(entrypoint=__file__)
-    launch_showcase(root, port=args.port, open_browser=args.open_browser, keep_existing=args.keep_existing)
+    root = Path(args.root).resolve() if args.root else repo_workspace_root()
+    launch_showcase(
+        root,
+        port=args.port,
+        serve_dashboard=args.serve,
+        open_browser=args.open_browser,
+        keep_existing=args.keep_existing,
+    )
 
 
 if __name__ == "__main__":

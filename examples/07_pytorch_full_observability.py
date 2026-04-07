@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from gradglass import gg
 
+from _example_output import print_dashboard_next_steps, repo_workspace_root
+
 
 def make_pattern(label, size=16):
     image = torch.zeros(size, size)
@@ -75,7 +77,7 @@ def evaluate(model, x, y, criterion):
 
 
 def main():
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
 
     train_x, train_y, val_x, val_y = build_datasets()
     train_loader = DataLoader(TensorDataset(train_x, train_y), batch_size=24, shuffle=True)
@@ -133,6 +135,7 @@ def main():
     print("Running the full GradGlass analysis suite...")
     run.analyze(print_summary=True)
     run.finish(open=False, analyze=False)
+    print_dashboard_next_steps(gg.store.root, live_monitor=True)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser(prog="gradglass", description="GradGlass — Neural Network Transparency Engine")
     subparsers = parser.add_subparsers(dest="command")
-    serve_parser = subparsers.add_parser("serve", help="Start the dashboard server")
+    serve_parser = subparsers.add_parser("serve", help="Start the dashboard for the current GradGlass workspace")
     serve_parser.add_argument("--port", type=int, default=8432, help="Port to bind to")
     serve_parser.add_argument("--no-browser", action="store_true", help="Don't open browser")
     subparsers.add_parser("list", help="List all runs")
@@ -31,7 +31,11 @@ def main():
         from gradglass.server import create_app, start_server_blocking
 
         app = create_app(gg.store)
-        start_server_blocking(app, port=args.port, open_browser=not args.no_browser)
+        try:
+            start_server_blocking(app, port=args.port, open_browser=not args.no_browser)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1)
     elif args.command == "list":
         from gradglass.core import gg
 
@@ -63,7 +67,11 @@ def main():
         from gradglass.server import create_app, start_server_blocking
 
         app = create_app(gg.store)
-        start_server_blocking(app, port=args.port, open_browser=not args.no_browser)
+        try:
+            start_server_blocking(app, port=args.port, open_browser=not args.no_browser)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1)
     elif args.command == "stop":
         from gradglass.core import gg
         from gradglass.monitor_control import stop_gradglass_monitor

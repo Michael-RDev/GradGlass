@@ -80,8 +80,9 @@ class GradGlass:
         return test_decorator
 
     def monitor(self, port=8432, open_browser=True):
-        from gradglass.server import create_app, start_server
+        from gradglass.server import create_app, ensure_dashboard_build_available, start_server
 
+        ensure_dashboard_build_available(workspace_root=self.store.root)
         app = create_app(self.store)
         actual_port = start_server(app, port=port)
         url = f"http://localhost:{actual_port}"

@@ -9,6 +9,7 @@ import urllib.request
 
 import pytest
 
+from examples._example_output import repo_workspace_root
 from gradglass.server import create_app, start_server
 
 
@@ -98,27 +99,13 @@ def test_dashboard_showcase_main_prints_workspace_matching_server_root(tmp_path,
 
     example = _load_example_module()
     workspace = tmp_path / "dashboard-showcase-main"
-    popen_calls = []
-
-    class DummyProcess:
-        pid = 424242
-
-        def poll(self):
-            return None
-
-    def fake_popen(cmd, **kwargs):
-        popen_calls.append((cmd, kwargs))
-        return DummyProcess()
-
-    monkeypatch.setattr("subprocess.Popen", fake_popen)
-    monkeypatch.setattr("gradglass.server._wait_for_server", lambda host, port, timeout=10.0: True)
-
     example.main(["--root", str(workspace), "--port", "8459", "--no-browser"])
     captured = capsys.readouterr().out
 
     assert f"Workspace: {workspace}" in captured
-    assert "Dashboard: http://127.0.0.1:8459" in captured
-    assert popen_calls
-    cmd = next(call[0] for call in popen_calls if "--root" in call[0])
-    assert "--root" in cmd
-    assert cmd[cmd.index("--root") + 1] == str(workspace)
+    assert f"Start dashboard: GRADGLASS_ROOT='{workspace}' gradglass serve --port 8459" in captured
+
+
+def test_dashboard_showcase_defaults_to_repo_workspace():
+    expected = Path(__file__).resolve().parents[1] / "gg_workspace"
+    assert repo_workspace_root() == expected

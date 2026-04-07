@@ -3,8 +3,10 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import tensorflow as tf
 from gradglass import gg
 
+from _example_output import print_dashboard_next_steps, repo_workspace_root
+
 def main():
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
 
     # Prepare dummy dataset
     (x_train, y_train), _ = tf.keras.datasets.mnist.load_data()
@@ -46,6 +48,7 @@ def main():
     # Flush artifacts and close
     run.finish(open=False, analyze=True)
     print("Done!")
+    print_dashboard_next_steps(gg.store.root)
 
 if __name__ == "__main__":
     main()

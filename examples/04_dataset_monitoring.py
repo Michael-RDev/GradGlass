@@ -1,9 +1,10 @@
 import numpy as np
 from gradglass import gg
 from gradglass.analysis.data_monitor import DatasetMonitorConfig
+from _example_output import print_dashboard_next_steps, repo_workspace_root
 
 def main():
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
     
     # We can create a strict configuration for the data monitor constraints
     config = DatasetMonitorConfig(
@@ -65,6 +66,7 @@ def main():
         print(f" > Stage '{stage_meta.name}': {stage_meta.sample_count} rows. Issue Count: {len(stage_meta.issues)}")
         for issue in stage_meta.issues:
             print(f"   - [Warning] {issue['type']} on feature {issue.get('feature_index', '?')}: {issue['severity']}")
+    print_dashboard_next_steps(gg.store.root)
 
 if __name__ == "__main__":
     main()

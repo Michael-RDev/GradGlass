@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -190,6 +191,51 @@ def _looks_like_gradglass_command(command: str) -> bool:
     return "gradglass.server" in lowered or "gradglass serve" in lowered or "gradglass monitor" in lowered
 
 
+def _get_process_command(pid: int) -> str:
+    try:
+        ps_result = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        return ps_result.stdout.strip() if ps_result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _get_process_cwd(pid: int) -> str:
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    for line in result.stdout.splitlines():
+        if line.startswith("n"):
+            return line[1:].strip()
+    return ""
+
+
+def _looks_like_gradglass_process(pid: int | None, command: str, *, allow_cwd_fallback: bool = True) -> bool:
+    if _looks_like_gradglass_command(command):
+        return True
+    if pid is None or not allow_cwd_fallback:
+        return False
+    cwd = _get_process_cwd(pid)
+    if not cwd:
+        return False
+    try:
+        return (Path(cwd) / "gradglass" / "server.py").exists()
+    except OSError:
+        return False
+
+
 def _find_process_by_port_with_psutil(port: int) -> tuple[Optional[int], Optional[str]]:
     try:
         import psutil  # type: ignore
@@ -215,7 +261,7 @@ def _find_process_by_port_with_psutil(port: int) -> tuple[Optional[int], Optiona
             process = psutil.Process(pid)
             command = " ".join(process.cmdline())
         except Exception:
-            command = ""
+            command = _get_process_command(int(pid))
         return pid, command
     return None, None
 
@@ -239,17 +285,7 @@ def _find_process_by_port_with_lsof(port: int) -> tuple[Optional[int], Optional[
             break
     if pid is None:
         return None, None
-    try:
-        ps_result = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        command = ps_result.stdout.strip() if ps_result.returncode == 0 else ""
-    except Exception:
-        command = ""
-    return pid, command
+    return pid, _get_process_command(pid)
 
 
 def find_process_by_port(port: int) -> tuple[Optional[int], Optional[str]]:
@@ -259,13 +295,113 @@ def find_process_by_port(port: int) -> tuple[Optional[int], Optional[str]]:
     return _find_process_by_port_with_lsof(port)
 
 
+def _parse_listen_port(name: str) -> Optional[int]:
+    match = re.search(r":(\d+)(?:\s*\(listen\))?$", (name or "").strip(), re.IGNORECASE)
+    if not match:
+        return None
+    return _safe_int(match.group(1))
+
+
+def _list_listening_processes_with_psutil() -> list[tuple[int, int, str]]:
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return []
+
+    records: list[tuple[int, int, str]] = []
+    seen: set[tuple[int, int]] = set()
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except Exception:
+        return []
+
+    for conn in connections:
+        if conn.status != getattr(psutil, "CONN_LISTEN", "LISTEN"):
+            continue
+        if not conn.laddr:
+            continue
+        port = getattr(conn.laddr, "port", None)
+        pid = conn.pid
+        if pid is None or port is None:
+            continue
+        key = (int(pid), int(port))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            process = psutil.Process(pid)
+            command = " ".join(process.cmdline())
+        except Exception:
+            command = ""
+        records.append((int(pid), int(port), command))
+    return records
+
+
+def _list_listening_processes_with_lsof() -> list[tuple[int, int, str]]:
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-FpPn"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+
+    records: list[tuple[int, int, str]] = []
+    seen: set[tuple[int, int]] = set()
+    pid: Optional[int] = None
+    for raw_line in result.stdout.splitlines():
+        if not raw_line:
+            continue
+        marker, value = raw_line[0], raw_line[1:]
+        if marker == "p":
+            pid = _safe_int(value)
+            continue
+        if marker != "n" or pid is None:
+            continue
+        port = _parse_listen_port(value)
+        if port is None:
+            continue
+        key = (pid, port)
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append((pid, port, _get_process_command(pid)))
+    return records
+
+
+def list_standalone_gradglass_targets(store=None) -> list[MonitorTarget]:
+    records = _list_listening_processes_with_psutil() or _list_listening_processes_with_lsof()
+    targets: list[MonitorTarget] = []
+    for pid, port, command in records:
+        if not _looks_like_gradglass_process(pid, command, allow_cwd_fallback=False):
+            continue
+        targets.append(
+            MonitorTarget(
+                run_id=None,
+                runtime_state_path=None,
+                port=port,
+                pid=pid,
+                source="process_scan",
+                metadata={"command": command},
+            )
+        )
+    return targets
+
+
 def _dedupe_targets(targets: list[MonitorTarget]) -> list[MonitorTarget]:
     deduped: list[MonitorTarget] = []
-    seen: set[tuple[Optional[int], Optional[int], Optional[str]]] = set()
+    seen: set[tuple[str, int | str]] = set()
     for target in targets:
-        key = (target.pid, target.port, None)
-        if key == (None, None, None):
-            key = (None, None, target.run_id)
+        if target.port is not None:
+            key = ("port", int(target.port))
+        elif target.pid is not None:
+            key = ("pid", int(target.pid))
+        else:
+            key = ("run_id", target.run_id or "")
         if key in seen:
             continue
         seen.add(key)
@@ -346,7 +482,7 @@ def _stop_target(target: MonitorTarget, *, stop_reason: str = "cli_stop") -> Mon
                 target=target,
                 stale=True,
             )
-        if not _looks_like_gradglass_command(command or ""):
+        if not _looks_like_gradglass_process(found_pid, command or ""):
             return MonitorStopResult(
                 status="refused",
                 message=f"Port {port} is not owned by a verified GradGlass server.",
@@ -396,7 +532,8 @@ def stop_monitor_targets(targets: list[MonitorTarget], *, allow_multiple: bool =
 
 def stop_gradglass_monitor(store, *, run_id: str | None = None, port: int | None = None, stop_all: bool = False) -> list[MonitorStopResult]:
     if stop_all:
-        return stop_monitor_targets(list_run_monitor_targets(store), allow_multiple=True)
+        targets = list_run_monitor_targets(store) + list_standalone_gradglass_targets(store)
+        return stop_monitor_targets(targets, allow_multiple=True)
 
     if port is not None:
         matching_targets = [target for target in list_run_monitor_targets(store) if target.port == int(port)]
@@ -405,7 +542,7 @@ def stop_gradglass_monitor(store, *, run_id: str | None = None, port: int | None
         found_pid, command = find_process_by_port(int(port))
         if found_pid is None:
             return [MonitorStopResult(status="not_found", message=f"No listening server found on port {port}.")]
-        if not _looks_like_gradglass_command(command or ""):
+        if not _looks_like_gradglass_process(found_pid, command or ""):
             return [MonitorStopResult(status="refused", message=f"Port {port} is not owned by a verified GradGlass server.")]
         target = MonitorTarget(run_id=None, runtime_state_path=None, port=int(port), pid=found_pid, source="explicit_port")
         return stop_monitor_targets([target], allow_multiple=False)

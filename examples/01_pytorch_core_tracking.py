@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from gradglass import gg
 
+from _example_output import print_dashboard_next_steps, repo_workspace_root
+
 
 def make_toy_loader(batch_size=32):
     torch.manual_seed(7)
@@ -34,7 +36,7 @@ class TinyClassifier(nn.Module):
 
 
 def main():
-    gg.configure(auto_open=False)
+    gg.configure(root=str(repo_workspace_root()), auto_open=False)
 
     loader = make_toy_loader()
     model = TinyClassifier()
@@ -79,6 +81,7 @@ def main():
     print("Running GradGlass analysis...")
     run.analyze(print_summary=True)
     run.finish(open=False, analyze=False)
+    print_dashboard_next_steps(gg.store.root)
 
 
 if __name__ == "__main__":
