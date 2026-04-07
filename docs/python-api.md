@@ -53,6 +53,15 @@ Useful options passed at creation time include:
 - `monitor_open_browser`
 - configuration values that help infer `total_steps`
 
+Recommended dashboard workflow:
+
+- use `monitor=True` when you want live viewing during training
+- use `gradglass serve` after training to inspect saved runs
+- keep `run.serve(...)` and `gg.monitor(...)` for explicit advanced flows
+- in a source checkout, build the frontend once with `npm --prefix gradglass/dashboard install && npm --prefix gradglass/dashboard run build` before starting the dashboard
+- `run.open()`, `run.serve(...)`, and `gg.monitor(...)` now raise a clear runtime error if the dashboard build is missing
+- detached servers started through `run.monitor(...)` or `run.serve(...)` can be stopped from the CLI with `gradglass stop`
+
 ### Core methods
 
 - `watch(model, optimizer=None, activations="auto", gradients="summary", saliency="auto", layers="trainable", sample_batches=2, probe_examples=16, every=50, monitor=None, monitor_port=None, monitor_open_browser=None)`
@@ -69,6 +78,12 @@ Useful options passed at creation time include:
 - `open()`
 - `serve(port=0, open_browser=True)`
 - `monitor(port=0, open_browser=True)`
+
+Behavior notes:
+
+- `open()` starts a foreground server for the current workspace and blocks until you stop it
+- `serve(...)` and `monitor(...)` launch a detached server process and return the chosen port
+- all dashboard-starting helpers verify that the frontend bundle exists before opening the server
 
 ### Explainability methods
 

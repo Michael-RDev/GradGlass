@@ -18,7 +18,7 @@ def test_release_versions_are_aligned(tmp_path):
 
     app = create_app(ArtifactStore(root=tmp_path / "workspace"))
 
-    assert __version__ == "1.1.0"
+    assert __version__ == "1.0.0"
     assert package_json["version"] == __version__
     assert app.version == __version__
     assert f"version-{__version__}-" in readme

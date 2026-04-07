@@ -19,6 +19,14 @@ pip install -e .[explainability]
 pip install -e .[all]
 ```
 
+If you are running GradGlass from this repo checkout instead of an installed release, build the dashboard once before
+using `gradglass serve`:
+
+```bash
+npm --prefix gradglass/dashboard install
+npm --prefix gradglass/dashboard run build
+```
+
 ## Create your first run
 
 The main entry point is the shared `gg` object:
@@ -54,6 +62,9 @@ run.finish()
 GradGlass writes to a `gg_workspace/` directory by default. The location is derived from the launching script when
 possible, otherwise from the current working directory.
 
+The repository examples intentionally override that to use the repo-root `gg_workspace/` so `gradglass serve` works
+immediately after you run an example from the repo root.
+
 Ways to override it:
 
 ```python
@@ -66,25 +77,40 @@ export GRADGLASS_ROOT=/path/to/workspace
 
 ## Open the dashboard
 
-From Python:
-
-```python
-run.serve(port=8432, open_browser=True)
-```
-
-or
-
-```python
-gg.monitor(port=8432)
-```
-
-From the CLI:
+After your training script finishes:
 
 ```bash
 gradglass serve --port 8432
 gradglass open
 gradglass list
 ```
+
+`gradglass serve` reads the current workspace and requires a built dashboard bundle. In this repo, examples are wired
+to the repo-root `gg_workspace/`, so a real training example followed by `gradglass serve --port 8432` is the normal
+post-run flow.
+
+If you need to inspect a different workspace from the shell, prefix the command:
+
+```bash
+GRADGLASS_ROOT=/path/to/workspace gradglass serve --port 8432
+```
+
+For live viewing during training, enable monitoring when you create the run:
+
+```python
+run = gg.run(name="experiment_name", task="classification", monitor=True)
+```
+
+Advanced Python-side server helpers still exist when you explicitly want them:
+
+```python
+run.serve(port=8432, open_browser=True)
+gg.monitor(port=8432, open_browser=True)
+```
+
+Both the CLI and Python helpers fail fast with a helpful runtime error when the dashboard bundle is missing or the
+requested port is already occupied. Detached monitor servers can be stopped later with `gradglass stop <run_id>`,
+`gradglass stop --port 8432`, or `gradglass stop --all`.
 
 ## PyTorch pattern
 
@@ -94,6 +120,7 @@ PyTorch integration is explicit and training-loop friendly:
 - call `run.log(...)` inside your loop
 - call `run.log_batch(...)` when you want richer probe artifacts
 - use `run.checkpoint_every(n)` or manual `run.checkpoint()`
+- use `monitor=True` on `gg.run(...)` if you want the dashboard live during training
 
 The minimal working example lives at [examples/01_pytorch_core_tracking.py](../examples/01_pytorch_core_tracking.py).
 

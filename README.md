@@ -1,15 +1,13 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/gradglass-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/gradglass-logo-light.svg">
-    <img alt="GradGlass" src="./docs/assets/gradglass-logo-light.svg" width="520" height="120" style="max-width: 100%;">
-  </picture>
+  <img alt="GradGlass badge" src="./gradglass/dashboard/public/gradglass-badge.svg" width="96" height="96">
+  <br/>
+  <strong style="font-size: 2rem; letter-spacing: -0.03em;">GradGlass</strong>
   <br/>
   <br/>
 </p>
 
 <p align="center">
-  <a href="./pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-1.1.0-1f7a8c"></a>
+  <a href="./pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-1.0.0-1f7a8c"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f4c5c"></a>
   <a href="./docs/index.md"><img alt="Documentation" src="https://img.shields.io/badge/docs-ready-2a9d8f"></a>
   <a href="./examples"><img alt="Examples" src="https://img.shields.io/badge/examples-9%20workflows-e9c46a"></a>
@@ -52,9 +50,15 @@ pip install -e .[explainability]
 pip install -e .[all]
 ```
 
+If you are working from this source checkout, build the dashboard bundle once before using `gradglass serve`:
+
+```bash
+npm --prefix gradglass/dashboard install
+npm --prefix gradglass/dashboard run build
+```
+
 When the dashboard bundle is missing, GradGlass now tries to build it while creating wheels and sdists. If the
-frontend toolchain is unavailable, packaging fails with a clear message instead of silently shipping the API-only
-placeholder.
+frontend toolchain is unavailable, packaging fails with a clear message instead of silently shipping an incomplete UI.
 
 ## Quickstart
 
@@ -109,21 +113,38 @@ run.finish(open=False, analyze=False)
 This creates a workspace with a structured run directory, including metadata, metrics, checkpoints, probes, analysis
 outputs, and any explainability artifacts you recorded.
 
+To inspect those results after training:
+
+```bash
+gradglass serve --port 8432
+```
+
+If the workspace lives somewhere other than the default `gg_workspace/` near your entrypoint, point the CLI at it with
+`GRADGLASS_ROOT=/path/to/workspace gradglass serve --port 8432`.
+
+For live viewing during training, create the run with `monitor=True`.
+
 ## CLI
 
-Use the packaged CLI to inspect and serve prior runs:
+Use the packaged CLI to inspect completed runs in the current workspace:
 
 ```bash
 gradglass list
 gradglass serve --port 8432
+gradglass monitor --port 8432
 gradglass open
 gradglass analyze <run_id>
+gradglass stop --port 8432
 gradglass stop --all
 ```
 
+In a dev checkout, `gradglass serve` requires the built frontend bundle under `gradglass/dashboard/dist`.
+When startup succeeds it prints the workspace path; when it fails, the CLI now exits with a clear error if the bundle
+is missing or the requested port is already in use.
+
 ## Release Checks
 
-Use these commands as the baseline `1.1.0` release gate:
+Use these commands as the baseline `1.0.0` release gate:
 
 ```bash
 pytest
@@ -164,7 +185,19 @@ The repository includes focused examples for:
 - API coverage generation
 - Dashboard showcase generation
 
-See [examples/README.md](./examples/README.md) and [docs/examples.md](./docs/examples.md).
+See [docs/examples.md](./docs/examples.md).
+
+When you run examples from the repo root, they now write into the repo-root `gg_workspace/` by default so the next
+step is simply:
+
+```bash
+gradglass serve --port 8432
+```
+
+The synthetic tooling demos also separate workspace generation from dashboard launch by default:
+
+- `08_api_feature_coverage.py` prints the serve command unless you pass `--serve`
+- `09_dashboard_showcase.py` prepares the showcase workspace unless you pass `--serve`
 
 ## Workspace Philosophy
 

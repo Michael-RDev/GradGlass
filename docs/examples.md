@@ -2,6 +2,10 @@
 
 The repository includes nine examples that double as documentation and feature coverage.
 
+If you want a real training script first, start with `01_pytorch_core_tracking.py`, `02_keras_integration.py`,
+`05_custom_tests_and_shap.py`, or `07_pytorch_full_observability.py`. Those train actual models and then print the
+exact `gradglass serve` command for the repo-root workspace they created.
+
 ## Recommended reading order
 
 1. `01_pytorch_core_tracking.py`
@@ -38,7 +42,7 @@ Shows how to register custom analysis checks and log SHAP summary artifacts for 
 
 ### 06: workspace and server
 
-Shows listing runs, reopening them, and manually starting a dashboard server.
+Shows listing runs, completing a small run, and then serving the resulting workspace afterward.
 
 ### 07: full observability
 
@@ -46,17 +50,30 @@ Shows a richer PyTorch path with activations, gradients, saliency, probes, check
 
 ### 08: API coverage
 
-Creates synthetic runs, starts the server, and programmatically exercises the entire API surface.
+Creates synthetic runs for API coverage. This is a tooling example, not the primary “real training script” entrypoint.
+Use `--serve` if you want it to launch the dashboard and exercise the API automatically.
 
 ### 09: dashboard showcase
 
-Creates a polished multi-run workspace intended to populate every dashboard section with realistic data.
+Creates a synthetic multi-run workspace intended to populate every dashboard section with realistic-looking data. By
+default it prepares the workspace and prints the `gradglass serve` command to run next.
 
 ## Example workspace behavior
 
-The examples intentionally write into `examples/gg_workspace/` by default so you can run them from the repo root and
-still get a coherent demo workspace.
+The examples intentionally write into the repo-root `gg_workspace/` by default so you can run them from the repo root
+and then immediately use plain `gradglass serve`.
 
 That workspace is generated on demand and is not part of the launch branch or release artifacts.
 
-For more detail, see [examples/README.md](../examples/README.md).
+Common conventions across the examples:
+
+- real training examples print the exact next `gradglass serve` command for the workspace they just created
+- synthetic tooling examples prefer generating artifacts first and only start the dashboard when you opt into `--serve`
+- when you override `--root`, the printed command switches to `GRADGLASS_ROOT='...' gradglass serve --port ...`
+
+If you are running from a source checkout, make sure the dashboard bundle exists before serving:
+
+```bash
+npm --prefix gradglass/dashboard install
+npm --prefix gradglass/dashboard run build
+```

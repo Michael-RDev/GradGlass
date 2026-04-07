@@ -38,4 +38,8 @@ npm --prefix gradglass/dashboard test
 python -m build
 ```
 
+`python -m build` now enforces the presence of `gradglass/dashboard/dist`. If `node_modules` is already present in the
+dashboard project, the packaging step attempts `npm --prefix gradglass/dashboard run build` automatically; otherwise it
+fails with instructions to build the frontend first.
+
 Make sure local workspaces, caches, build outputs, and generated example artifacts are not part of the release commit.
