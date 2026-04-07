@@ -22,11 +22,7 @@ def test_default_workspace_tracks_launched_script_directory(tmp_path):
     script_dir = tmp_path / "examples"
     script_dir.mkdir()
     script_path = script_dir / "train.py"
-    script_path.write_text(
-        "from gradglass import gg\n"
-        "print(gg.store.root.resolve())\n",
-        encoding="utf-8",
-    )
+    script_path.write_text("from gradglass import gg\nprint(gg.store.root.resolve())\n", encoding="utf-8")
 
     launch_dir = tmp_path / "launch_here"
     launch_dir.mkdir()
@@ -34,12 +30,7 @@ def test_default_workspace_tracks_launched_script_directory(tmp_path):
     env["PYTHONPATH"] = _pythonpath_with_repo()
 
     result = subprocess.run(
-        [sys.executable, str(script_path)],
-        cwd=launch_dir,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
+        [sys.executable, str(script_path)], cwd=launch_dir, env=env, capture_output=True, text=True, check=True
     )
 
     assert result.stdout.strip() == str((script_dir / DEFAULT_WORKSPACE_DIRNAME).resolve())

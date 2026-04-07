@@ -53,10 +53,7 @@ def _load_example_module():
 
 def test_api_feature_coverage_example_exercises_every_endpoint(tmp_path):
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
     if probe.returncode != 0:
         pytest.skip("Torch is not importable in this environment; skipping API coverage example test.")
@@ -89,10 +86,7 @@ def test_api_feature_coverage_example_exercises_every_endpoint(tmp_path):
 
 def test_api_feature_coverage_main_prints_manual_serve_command(tmp_path, capsys):
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
     if probe.returncode != 0:
         pytest.skip("Torch is not importable in this environment; skipping API coverage example test.")

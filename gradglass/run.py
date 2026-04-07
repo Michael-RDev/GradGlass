@@ -13,7 +13,7 @@ from gradglass.browser import open_url_detached, resolve_open_browser_preference
 from gradglass.experiment_tracking import infer_total_steps_from_config
 
 if TYPE_CHECKING:
-    from gradglass.artifacts import ArtifactStore
+    pass
 
 _UNSET = object()
 
@@ -794,7 +794,6 @@ class Run:
         return report
 
     def check_leakage_from_loaders(self, train_loader, test_loader, max_samples=2000, print_summary=True):
-        import numpy as np
 
         try:
             import torch

@@ -115,12 +115,7 @@ def find_run_monitor_target(store, run_id: str) -> Optional[MonitorTarget]:
     if not bool(state.get("monitor_enabled")) and port is None and pid is None:
         return None
     return MonitorTarget(
-        run_id=run_id,
-        runtime_state_path=state_path,
-        port=port,
-        pid=pid,
-        source="runtime_state",
-        metadata=state,
+        run_id=run_id, runtime_state_path=state_path, port=port, pid=pid, source="runtime_state", metadata=state
     )
 
 
@@ -193,12 +188,7 @@ def _looks_like_gradglass_command(command: str) -> bool:
 
 def _get_process_command(pid: int) -> str:
     try:
-        ps_result = subprocess.run(
-            ["ps", "-o", "command=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
+        ps_result = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, timeout=3)
         return ps_result.stdout.strip() if ps_result.returncode == 0 else ""
     except Exception:
         return ""
@@ -207,10 +197,7 @@ def _get_process_command(pid: int) -> str:
 def _get_process_cwd(pid: int) -> str:
     try:
         result = subprocess.run(
-            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
-            capture_output=True,
-            text=True,
-            timeout=3,
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=3
         )
     except Exception:
         return ""
@@ -269,10 +256,7 @@ def _find_process_by_port_with_psutil(port: int) -> tuple[Optional[int], Optiona
 def _find_process_by_port_with_lsof(port: int) -> tuple[Optional[int], Optional[str]]:
     try:
         result = subprocess.run(
-            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
-            capture_output=True,
-            text=True,
-            timeout=3,
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"], capture_output=True, text=True, timeout=3
         )
     except Exception:
         return None, None
@@ -340,10 +324,7 @@ def _list_listening_processes_with_psutil() -> list[tuple[int, int, str]]:
 def _list_listening_processes_with_lsof() -> list[tuple[int, int, str]]:
     try:
         result = subprocess.run(
-            ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-FpPn"],
-            capture_output=True,
-            text=True,
-            timeout=3,
+            ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-FpPn"], capture_output=True, text=True, timeout=3
         )
     except Exception:
         return []
@@ -455,15 +436,10 @@ def _stop_target(target: MonitorTarget, *, stop_reason: str = "cli_stop") -> Mon
                 monitor_stop_reason=stop_reason,
             )
             return MonitorStopResult(
-                status="stopped",
-                message=_stop_success_message(target, pid, port),
-                target=target,
-                stopped=True,
+                status="stopped", message=_stop_success_message(target, pid, port), target=target, stopped=True
             )
         return MonitorStopResult(
-            status="error",
-            message=f"Failed to stop GradGlass monitor for {label} (pid {pid}).",
-            target=target,
+            status="error", message=f"Failed to stop GradGlass monitor for {label} (pid {pid}).", target=target
         )
 
     if port is not None:
@@ -484,9 +460,7 @@ def _stop_target(target: MonitorTarget, *, stop_reason: str = "cli_stop") -> Mon
             )
         if not _looks_like_gradglass_process(found_pid, command or ""):
             return MonitorStopResult(
-                status="refused",
-                message=f"Port {port} is not owned by a verified GradGlass server.",
-                target=target,
+                status="refused", message=f"Port {port} is not owned by a verified GradGlass server.", target=target
             )
         target.pid = found_pid
         if _terminate_pid(found_pid):
@@ -498,25 +472,20 @@ def _stop_target(target: MonitorTarget, *, stop_reason: str = "cli_stop") -> Mon
                 monitor_stop_reason=stop_reason,
             )
             return MonitorStopResult(
-                status="stopped",
-                message=_stop_success_message(target, found_pid, port),
-                target=target,
-                stopped=True,
+                status="stopped", message=_stop_success_message(target, found_pid, port), target=target, stopped=True
             )
         return MonitorStopResult(
-            status="error",
-            message=f"Failed to stop GradGlass monitor on port {port} (pid {found_pid}).",
-            target=target,
+            status="error", message=f"Failed to stop GradGlass monitor on port {port} (pid {found_pid}).", target=target
         )
 
     return MonitorStopResult(
-        status="not_found",
-        message=f"No monitor target found for run '{target.run_id}'.",
-        target=target,
+        status="not_found", message=f"No monitor target found for run '{target.run_id}'.", target=target
     )
 
 
-def stop_monitor_targets(targets: list[MonitorTarget], *, allow_multiple: bool = False, stop_reason: str = "cli_stop") -> list[MonitorStopResult]:
+def stop_monitor_targets(
+    targets: list[MonitorTarget], *, allow_multiple: bool = False, stop_reason: str = "cli_stop"
+) -> list[MonitorStopResult]:
     deduped = _dedupe_targets(targets)
     if not deduped:
         return [MonitorStopResult(status="not_found", message="No GradGlass monitor targets found.")]
@@ -530,7 +499,9 @@ def stop_monitor_targets(targets: list[MonitorTarget], *, allow_multiple: bool =
     return [_stop_target(target, stop_reason=stop_reason) for target in deduped]
 
 
-def stop_gradglass_monitor(store, *, run_id: str | None = None, port: int | None = None, stop_all: bool = False) -> list[MonitorStopResult]:
+def stop_gradglass_monitor(
+    store, *, run_id: str | None = None, port: int | None = None, stop_all: bool = False
+) -> list[MonitorStopResult]:
     if stop_all:
         targets = list_run_monitor_targets(store) + list_standalone_gradglass_targets(store)
         return stop_monitor_targets(targets, allow_multiple=True)
@@ -543,8 +514,12 @@ def stop_gradglass_monitor(store, *, run_id: str | None = None, port: int | None
         if found_pid is None:
             return [MonitorStopResult(status="not_found", message=f"No listening server found on port {port}.")]
         if not _looks_like_gradglass_process(found_pid, command or ""):
-            return [MonitorStopResult(status="refused", message=f"Port {port} is not owned by a verified GradGlass server.")]
-        target = MonitorTarget(run_id=None, runtime_state_path=None, port=int(port), pid=found_pid, source="explicit_port")
+            return [
+                MonitorStopResult(status="refused", message=f"Port {port} is not owned by a verified GradGlass server.")
+            ]
+        target = MonitorTarget(
+            run_id=None, runtime_state_path=None, port=int(port), pid=found_pid, source="explicit_port"
+        )
         return stop_monitor_targets([target], allow_multiple=False)
 
     if run_id is not None:
@@ -555,7 +530,6 @@ def stop_gradglass_monitor(store, *, run_id: str | None = None, port: int | None
 
     return [
         MonitorStopResult(
-            status="usage_error",
-            message="Specify a run_id, --port, or --all to stop a GradGlass monitor.",
+            status="usage_error", message="Specify a run_id, --port, or --all to stop a GradGlass monitor."
         )
     ]

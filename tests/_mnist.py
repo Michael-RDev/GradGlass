@@ -25,11 +25,7 @@ def _mnist_split(split: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def mnist_subset(
-    split: str,
-    indices: list[int] | np.ndarray,
-    *,
-    flatten: bool = False,
-    normalize: bool = True,
+    split: str, indices: list[int] | np.ndarray, *, flatten: bool = False, normalize: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
     images, labels = _mnist_split(split)
     selected = np.asarray(indices, dtype=np.int64)

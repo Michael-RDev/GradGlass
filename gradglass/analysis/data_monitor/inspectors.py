@@ -99,7 +99,9 @@ def detect_modality(sample: Any, task: TaskType = TaskType.UNKNOWN, task_hint: s
     if isinstance(sample, str):
         return ModalityType.TEXT
     if isinstance(sample, dict):
-        field_modalities = {detect_modality(value, TaskType.UNKNOWN, None) for value in sample.values() if value is not None}
+        field_modalities = {
+            detect_modality(value, TaskType.UNKNOWN, None) for value in sample.values() if value is not None
+        }
         field_modalities.discard(ModalityType.UNKNOWN)
         if len(field_modalities) > 1:
             return ModalityType.MULTIMODAL

@@ -76,11 +76,7 @@ class TabularMLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(len(FEATURE_NAMES), 24),
-            nn.ReLU(),
-            nn.Linear(24, 12),
-            nn.ReLU(),
-            nn.Linear(12, 2),
+            nn.Linear(len(FEATURE_NAMES), 24), nn.ReLU(), nn.Linear(24, 12), nn.ReLU(), nn.Linear(12, 2)
         )
 
     def forward(self, x):
@@ -117,7 +113,9 @@ def main():
     try:
         import shap
     except ImportError as exc:
-        raise RuntimeError("Install explainability dependencies with `pip install -e .[torch,explainability]`.") from exc
+        raise RuntimeError(
+            "Install explainability dependencies with `pip install -e .[torch,explainability]`."
+        ) from exc
 
     gg.configure(root=str(repo_workspace_root()), auto_open=False)
 
@@ -131,13 +129,7 @@ def main():
     run = gg.run(name="tabular_shap_explainability", task="classification")
     run.checkpoint_every(1)
     run.watch(
-        model,
-        optimizer=optimizer,
-        activations="auto",
-        gradients="summary",
-        saliency="auto",
-        every=1,
-        probe_examples=16,
+        model, optimizer=optimizer, activations="auto", gradients="summary", saliency="auto", every=1, probe_examples=16
     )
 
     print(f"Started SHAP example run: {run.run_id}")

@@ -10,14 +10,14 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from gradglass.run import Run
+from gradglass.run import Run  # noqa: E402
 
 EXAMPLES_DIR = Path(__file__).resolve().parent
 if str(EXAMPLES_DIR) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_DIR))
 
-from _example_output import repo_workspace_root, serve_command_for_workspace
-from _showcase_support import (
+from _example_output import repo_workspace_root, serve_command_for_workspace  # noqa: E402
+from _showcase_support import (  # noqa: E402
     build_tabular_run,
     configure_store,
     create_distributed_artifacts,
@@ -40,7 +40,9 @@ def _latest_runs_by_name(store, names: dict[str, str]) -> dict[str, Run]:
         if name not in names.values():
             continue
         previous = indexed.get(name)
-        if previous is None or float(meta.get("start_time_epoch") or 0.0) >= float(previous.get("start_time_epoch") or 0.0):
+        if previous is None or float(meta.get("start_time_epoch") or 0.0) >= float(
+            previous.get("start_time_epoch") or 0.0
+        ):
             indexed[name] = meta
 
     resolved = {}
@@ -96,14 +98,7 @@ def create_showcase_runs(root: Path, *, keep_existing: bool = False) -> dict[str
         failure_message="Synthetic showcase failure: validation drift and runtime instability detected.",
     )
 
-    return {
-        "store": store,
-        "runs": {
-            "baseline": baseline["run"],
-            "primary": primary["run"],
-            "problem": problem["run"],
-        },
-    }
+    return {"store": store, "runs": {"baseline": baseline["run"], "primary": primary["run"], "problem": problem["run"]}}
 
 
 def build_guided_tour(base_url: str, runs: dict[str, Run]) -> list[tuple[str, str]]:
@@ -191,11 +186,23 @@ def parse_args(argv: list[str] | None = None):
         help="Workspace root for generated artifacts. Defaults to ./gg_workspace beside this example.",
     )
     parser.add_argument("--port", type=int, default=8432, help="Requested port for the GradGlass server.")
-    parser.add_argument("--serve", action="store_true", help="Start the GradGlass dashboard server after generating the showcase workspace.")
-    parser.add_argument("--keep-existing", action="store_true", help="Reuse the latest showcase runs if they already exist in this workspace.")
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start the GradGlass dashboard server after generating the showcase workspace.",
+    )
+    parser.add_argument(
+        "--keep-existing",
+        action="store_true",
+        help="Reuse the latest showcase runs if they already exist in this workspace.",
+    )
     parser.set_defaults(open_browser=False)
-    parser.add_argument("--open-browser", dest="open_browser", action="store_true", help="Open the dashboard in a browser.")
-    parser.add_argument("--no-browser", dest="open_browser", action="store_false", help="Do not open the dashboard in a browser.")
+    parser.add_argument(
+        "--open-browser", dest="open_browser", action="store_true", help="Open the dashboard in a browser."
+    )
+    parser.add_argument(
+        "--no-browser", dest="open_browser", action="store_false", help="Do not open the dashboard in a browser."
+    )
     return parser.parse_args(argv)
 
 

@@ -90,10 +90,7 @@ def build_alert_snapshot(
 
     if overview is None:
         overview = build_overview_snapshot(
-            run_id=run_id,
-            metadata=metadata,
-            metrics=metrics,
-            runtime_state=runtime_state,
+            run_id=run_id, metadata=metadata, metrics=metrics, runtime_state=runtime_state
         )
 
     ctx = _build_live_context(store, run_id, run_dir, metadata, metrics)
@@ -149,13 +146,7 @@ def _load_analysis_report(store, run_id, run_dir, overview: dict[str, Any]) -> O
         return None
 
     try:
-        report = PostRunReport.generate(
-            run_id=run_id,
-            store=store,
-            run_dir=run_dir,
-            save=True,
-            print_summary=False,
-        )
+        report = PostRunReport.generate(run_id=run_id, store=store, run_dir=run_dir, save=True, print_summary=False)
         return report.to_dict()
     except Exception:
         return None
@@ -213,7 +204,8 @@ def _runtime_alerts(overview: dict[str, Any], runtime_state: Optional[dict[str, 
                 severity="HIGH",
                 category="Runtime Health",
                 title="Training heartbeat stalled",
-                message=status_reason or "GradGlass has not seen a fresh heartbeat recently, so live training may be stuck.",
+                message=status_reason
+                or "GradGlass has not seen a fresh heartbeat recently, so live training may be stuck.",
                 recommendation="Check the trainer process, data loader, and resource usage. Restart the run if the process is no longer making progress.",
                 details=details,
                 cta_path="/infrastructure",
@@ -285,7 +277,11 @@ def _live_builtin_alerts(ctx: TestContext) -> list[dict[str, Any]]:
         result = fn(ctx).to_dict()
         if result.get("status") in {"pass", "skip"}:
             continue
-        alerts.append(_alert_from_test_result(result, source="metrics" if result.get("category") == "Training Metrics" else "gradient"))
+        alerts.append(
+            _alert_from_test_result(
+                result, source="metrics" if result.get("category") == "Training Metrics" else "gradient"
+            )
+        )
     return alerts
 
 
@@ -397,7 +393,9 @@ def _message_for_test_result(test_id: str, details: dict[str, Any], recommendati
     if test_id == "OVERFITTING_HEURISTIC":
         inc = details.get("val_loss_increase_ratio")
         if inc is not None:
-            return f"Validation loss rose by {inc:.0%} during the final training segment while training loss kept falling."
+            return (
+                f"Validation loss rose by {inc:.0%} during the final training segment while training loss kept falling."
+            )
         return "Validation loss is rising while training loss continues to improve."
     if test_id == "VAL_LOSS_DIVERGENCE":
         rise_rate = details.get("rise_rate")
@@ -464,29 +462,17 @@ def _evidence_for_test_result(test_id: str, details: dict[str, Any]) -> list[str
         issues = details.get("issues") or []
         if issues:
             first = issues[0]
-            return [
-                f"Layer: {first.get('layer')}",
-                f"Metric: {first.get('metric')}",
-                f"Step: {first.get('step')}",
-            ]
+            return [f"Layer: {first.get('layer')}", f"Metric: {first.get('metric')}", f"Step: {first.get('step')}"]
     if test_id == "GRAD_VANISHING":
         entries = details.get("vanishing_entries") or []
         if entries:
             first = entries[0]
-            return [
-                f"Layer: {first.get('layer')}",
-                f"Norm: {first.get('norm')}",
-                f"Step: {first.get('step')}",
-            ]
+            return [f"Layer: {first.get('layer')}", f"Norm: {first.get('norm')}", f"Step: {first.get('step')}"]
     if test_id == "GRAD_EXPLODING":
         entries = details.get("exploding_entries") or []
         if entries:
             first = entries[0]
-            return [
-                f"Layer: {first.get('layer')}",
-                f"Norm: {first.get('norm')}",
-                f"Step: {first.get('step')}",
-            ]
+            return [f"Layer: {first.get('layer')}", f"Norm: {first.get('norm')}", f"Step: {first.get('step')}"]
     return _generic_evidence(details)
 
 

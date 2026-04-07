@@ -70,15 +70,16 @@ def build_lime_samples(feature_names: list[str], values: np.ndarray) -> list[dic
                 "prediction": "positive" if np.sum(row) >= 0 else "negative",
                 "probability": float(min(0.99, max(0.51, 0.65 + 0.05 * index))),
                 "explanation": [
-                    {"feature": feature_names[int(idx)], "weight": float(round(row[int(idx)], 6))}
-                    for idx in ranked
+                    {"feature": feature_names[int(idx)], "weight": float(round(row[int(idx)], 6))} for idx in ranked
                 ],
             }
         )
     return samples
 
 
-def evaluate_model(model: nn.Module, x: torch.Tensor, y: torch.Tensor, criterion: nn.Module) -> tuple[torch.Tensor, float, float]:
+def evaluate_model(
+    model: nn.Module, x: torch.Tensor, y: torch.Tensor, criterion: nn.Module
+) -> tuple[torch.Tensor, float, float]:
     model.eval()
     with torch.no_grad():
         logits = model(x)
@@ -96,13 +97,7 @@ def _predict_positive_probabilities(model: nn.Module, batch: np.ndarray) -> np.n
 
 
 def build_tabular_run(
-    store: ArtifactStore,
-    *,
-    name: str,
-    width: int,
-    seed: int,
-    include_extra_artifacts: bool,
-    finish_run: bool,
+    store: ArtifactStore, *, name: str, width: int, seed: int, include_extra_artifacts: bool, finish_run: bool
 ) -> dict[str, Any]:
     train_x, train_y, val_x, val_y = make_dataset(seed=seed)
     loader = DataLoader(TensorDataset(train_x, train_y), batch_size=32, shuffle=True)
@@ -114,13 +109,7 @@ def build_tabular_run(
     run = gg.run(name=name, task="classification", monitor=False)
     run.checkpoint_every(1)
     run.watch(
-        model,
-        optimizer=optimizer,
-        activations="auto",
-        gradients="summary",
-        saliency="auto",
-        every=1,
-        probe_examples=16,
+        model, optimizer=optimizer, activations="auto", gradients="summary", saliency="auto", every=1, probe_examples=16
     )
 
     for _epoch in range(5):
@@ -160,12 +149,7 @@ def build_tabular_run(
             centered_inputs = eval_slice - np.mean(background, axis=0, keepdims=True)
             shap_values = centered_inputs * probs.reshape(-1, 1)
 
-        run.log_shap(
-            FEATURE_NAMES,
-            shap_values,
-            message="Coverage harness SHAP summary.",
-            top_k=len(FEATURE_NAMES),
-        )
+        run.log_shap(FEATURE_NAMES, shap_values, message="Coverage harness SHAP summary.", top_k=len(FEATURE_NAMES))
 
         shap_scores = run.store.get_shap(run.run_id)["summary_plot"]
         lime_weights = np.array([item["mean_shap"] for item in shap_scores], dtype=np.float64)
@@ -231,20 +215,10 @@ def create_runs_for_coverage(root: Path) -> dict[str, Any]:
     gg.store = store
 
     baseline = build_tabular_run(
-        store,
-        name="api_baseline_run",
-        width=16,
-        seed=11,
-        include_extra_artifacts=False,
-        finish_run=True,
+        store, name="api_baseline_run", width=16, seed=11, include_extra_artifacts=False, finish_run=True
     )
     coverage = build_tabular_run(
-        store,
-        name="api_coverage_run",
-        width=24,
-        seed=17,
-        include_extra_artifacts=True,
-        finish_run=False,
+        store, name="api_coverage_run", width=24, seed=17, include_extra_artifacts=True, finish_run=False
     )
     distributed = create_distributed_artifacts(store, coverage["run"].run_id)
 
@@ -292,11 +266,7 @@ def resolve_server_port(requested_port: int) -> tuple[int, str | None]:
 
 
 async def collect_stream_events(
-    websocket_url: str,
-    trigger_fn,
-    *,
-    expected_types: set[str] | None = None,
-    attempts: int = 8,
+    websocket_url: str, trigger_fn, *, expected_types: set[str] | None = None, attempts: int = 8
 ) -> list[dict[str, Any]]:
     expected = expected_types or {"metrics_update", "overview_update", "alerts_update"}
     events: list[dict[str, Any]] = []
@@ -333,9 +303,7 @@ def exercise_api(
     runs_payload = _read_json(f"{base_url}/api/runs")
     check("GET /api/runs", runs_payload.get("total", 0) >= 2, f"runs={runs_payload.get('total', 0)}")
 
-    compare_payload = _read_json(
-        f"{base_url}/api/compare?run_ids={encoded_baseline},{encoded_coverage}"
-    )
+    compare_payload = _read_json(f"{base_url}/api/compare?run_ids={encoded_baseline},{encoded_coverage}")
     check(
         "GET /api/compare",
         baseline_run.run_id in compare_payload and coverage_run.run_id in compare_payload,
@@ -343,13 +311,21 @@ def exercise_api(
     )
 
     run_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}")
-    check("GET /api/runs/{run_id}", run_payload.get("run_id") == coverage_run.run_id, f"status={run_payload.get('status')}")
+    check(
+        "GET /api/runs/{run_id}",
+        run_payload.get("run_id") == coverage_run.run_id,
+        f"status={run_payload.get('status')}",
+    )
 
     metrics_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/metrics")
     check("GET /metrics", metrics_payload.get("total", 0) > 0, f"metrics={metrics_payload.get('total', 0)}")
 
     overview_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/overview")
-    check("GET /overview", overview_payload.get("run_id") == coverage_run.run_id, f"health={overview_payload.get('health_state')}")
+    check(
+        "GET /overview",
+        overview_payload.get("run_id") == coverage_run.run_id,
+        f"health={overview_payload.get('health_state')}",
+    )
 
     alerts_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/alerts")
     check("GET /alerts", "summary" in alerts_payload, f"alerts={alerts_payload.get('summary', {}).get('total')}")
@@ -367,15 +343,24 @@ def exercise_api(
         check("GET /diff", False, "Need >=2 checkpoints")
 
     gradients_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/gradients")
-    check("GET /gradients", bool(gradients_payload.get("summaries")), f"summaries={len(gradients_payload.get('summaries', []))}")
+    check(
+        "GET /gradients",
+        bool(gradients_payload.get("summaries")),
+        f"summaries={len(gradients_payload.get('summaries', []))}",
+    )
 
     activations_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/activations")
-    check("GET /activations", bool(activations_payload.get("activations")), f"activations={len(activations_payload.get('activations', []))}")
+    check(
+        "GET /activations",
+        bool(activations_payload.get("activations")),
+        f"activations={len(activations_payload.get('activations', []))}",
+    )
 
     distributions_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/distributions")
     check(
         "GET /distributions",
-        distributions_payload.get("weights", {}).get("available") or distributions_payload.get("activations", {}).get("available"),
+        distributions_payload.get("weights", {}).get("available")
+        or distributions_payload.get("activations", {}).get("available"),
         f"default_mode={distributions_payload.get('default_mode')}",
     )
 
@@ -383,7 +368,11 @@ def exercise_api(
     check("GET /saliency", saliency_payload.get("available") is True, f"modality={saliency_payload.get('modality')}")
 
     embeddings_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/embeddings")
-    check("GET /embeddings", embeddings_payload.get("available") is True, f"layers={len(embeddings_payload.get('layers', []))}")
+    check(
+        "GET /embeddings",
+        embeddings_payload.get("available") is True,
+        f"layers={len(embeddings_payload.get('layers', []))}",
+    )
 
     shap_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/shap")
     check("GET /shap", bool(shap_payload.get("summary_plot")), f"features={len(shap_payload.get('summary_plot', []))}")
@@ -399,8 +388,16 @@ def exercise_api(
     )
 
     architecture_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/architecture")
-    non_input_layers = [layer for layer in architecture_payload.get("layers", []) if "." in layer.get("id", "") or layer.get("param_count", 0) > 0]
-    check("GET /architecture", bool(architecture_payload.get("layers")), f"layers={len(architecture_payload.get('layers', []))}")
+    non_input_layers = [
+        layer
+        for layer in architecture_payload.get("layers", [])
+        if "." in layer.get("id", "") or layer.get("param_count", 0) > 0
+    ]
+    check(
+        "GET /architecture",
+        bool(architecture_payload.get("layers")),
+        f"layers={len(architecture_payload.get('layers', []))}",
+    )
 
     analysis_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/analysis")
     check("GET /analysis", "tests" in analysis_payload, f"tests={analysis_payload.get('tests', {}).get('total')}")
@@ -421,7 +418,11 @@ def exercise_api(
     check("GET /leakage", bool(leakage_payload.get("results")), f"checks={len(leakage_payload.get('results', []))}")
 
     data_monitor_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/data-monitor")
-    check("GET /data-monitor", "metadata" in data_monitor_payload, f"dataset={data_monitor_payload.get('metadata', {}).get('dataset_name')}")
+    check(
+        "GET /data-monitor",
+        "metadata" in data_monitor_payload,
+        f"dataset={data_monitor_payload.get('metadata', {}).get('dataset_name')}",
+    )
 
     if non_input_layers:
         target_layer = non_input_layers[0]["id"]
@@ -445,7 +446,11 @@ def exercise_api(
     check("GET /infrastructure", "telemetry_v2" in infrastructure_payload, f"mode={infrastructure_payload.get('mode')}")
 
     eval_payload = _read_json(f"{base_url}/api/runs/{encoded_coverage}/eval")
-    check("GET /eval", bool(eval_payload.get("report", {}).get("evaluations")), f"evals={len(eval_payload.get('report', {}).get('evaluations', []))}")
+    check(
+        "GET /eval",
+        bool(eval_payload.get("report", {}).get("evaluations")),
+        f"evals={len(eval_payload.get('report', {}).get('evaluations', []))}",
+    )
 
     criterion = nn.CrossEntropyLoss()
 
@@ -456,12 +461,15 @@ def exercise_api(
 
     events = asyncio.run(
         collect_stream_events(
-            f"{base_url.replace('http', 'ws')}/api/runs/{encoded_coverage}/stream",
-            trigger_new_events,
+            f"{base_url.replace('http', 'ws')}/api/runs/{encoded_coverage}/stream", trigger_new_events
         )
     )
     event_types = {event.get("type") for event in events}
-    check("WS /stream", {"metrics_update", "overview_update", "alerts_update"}.issubset(event_types), f"events={sorted(event_types)}")
+    check(
+        "WS /stream",
+        {"metrics_update", "overview_update", "alerts_update"}.issubset(event_types),
+        f"events={sorted(event_types)}",
+    )
 
     return results
 
@@ -478,14 +486,18 @@ def print_coverage_table(results: list[dict[str, Any]]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate synthetic GradGlass runs and exercise every current /api feature.")
+    parser = argparse.ArgumentParser(
+        description="Generate synthetic GradGlass runs and exercise every current /api feature."
+    )
     parser.add_argument(
         "--root",
         default=None,
         help="Workspace root for generated artifacts. Defaults to ./gg_workspace beside this example.",
     )
     parser.add_argument("--port", type=int, default=8432, help="Port for the GradGlass server.")
-    parser.add_argument("--serve", action="store_true", help="Start the GradGlass dashboard server after generating coverage runs.")
+    parser.add_argument(
+        "--serve", action="store_true", help="Start the GradGlass dashboard server after generating coverage runs."
+    )
     parser.add_argument("--open-browser", action="store_true", help="Open the dashboard in a browser.")
     args = parser.parse_args()
 

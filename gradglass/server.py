@@ -6,7 +6,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
-import numpy as np
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,12 +39,7 @@ def get_overview_snapshot(store: ArtifactStore, run_id: str, metrics: Optional[l
     metric_rows = metrics if metrics is not None else store.get_metrics(run_id)
     runtime_state = store.get_runtime_state(run_id)
 
-    return build_overview_snapshot(
-        run_id=run_id,
-        metadata=meta,
-        metrics=metric_rows,
-        runtime_state=runtime_state,
-    )
+    return build_overview_snapshot(run_id=run_id, metadata=meta, metrics=metric_rows, runtime_state=runtime_state)
 
 
 def create_app(store):
@@ -122,19 +116,9 @@ def create_app(store):
 
         metrics = store.get_metrics(run_id)
         runtime_state = store.get_runtime_state(run_id)
-        overview = build_overview_snapshot(
-            run_id=run_id,
-            metadata=meta,
-            metrics=metrics,
-            runtime_state=runtime_state,
-        )
+        overview = build_overview_snapshot(run_id=run_id, metadata=meta, metrics=metrics, runtime_state=runtime_state)
         return build_alert_snapshot(
-            store,
-            run_id,
-            metadata=meta,
-            metrics=metrics,
-            runtime_state=runtime_state,
-            overview=overview,
+            store, run_id, metadata=meta, metrics=metrics, runtime_state=runtime_state, overview=overview
         )
 
     @app.get("/api/runs/{run_id}/checkpoints")
@@ -240,8 +224,6 @@ def create_app(store):
             raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
 
         summaries = store.get_gradient_summaries(run_id)
-        arch = store.get_architecture(run_id)
-
         layer_norms: dict[str, list[float]] = {}
         for entry in summaries:
             for layer, data in entry.get("layers", {}).items():
@@ -286,7 +268,7 @@ def create_app(store):
         for c in candidates[:8]:
             layer_path = c["layer"].replace(".", ".")
             pytorch_lines.append(f"# for param in model.{layer_path}.parameters():")
-            pytorch_lines.append(f"#     param.requires_grad_(False)")
+            pytorch_lines.append("#     param.requires_grad_(False)")
 
         pytorch_lines += [
             "",
@@ -471,7 +453,14 @@ def create_app(store):
                         }
                     )
                     break
-                if str((overview or {}).get("status") or "").strip().lower() in {"complete", "completed", "finished", "failed", "cancelled", "interrupted"}:
+                if str((overview or {}).get("status") or "").strip().lower() in {
+                    "complete",
+                    "completed",
+                    "finished",
+                    "failed",
+                    "cancelled",
+                    "interrupted",
+                }:
                     break
                 await asyncio.sleep(1.0)
         except WebSocketDisconnect:
@@ -492,7 +481,7 @@ def create_app(store):
 
 
 def apply_mutation(draft, mutation):
-    layers = {l["id"]: l for l in draft.get("layers", [])}
+    layers = {layer["id"]: layer for layer in draft.get("layers", [])}
     edges = draft.get("edges", [])
     if mutation.operation == "freeze":
         if mutation.target_layer not in layers:
@@ -514,7 +503,7 @@ def apply_mutation(draft, mutation):
             for succ in successors:
                 new_edges.append([pred, succ])
         draft["edges"] = new_edges
-        draft["layers"] = [l for l in draft["layers"] if l["id"] != mutation.target_layer]
+        draft["layers"] = [layer for layer in draft["layers"] if layer["id"] != mutation.target_layer]
         return {"valid": True, "draft": draft, "message": f"Layer '{mutation.target_layer}' removed"}
     elif mutation.operation == "add":
         new_layer = {
@@ -651,12 +640,12 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the GradGlass dashboard server.")
-    parser.add_argument("--root", default=None, help="Artifact store root. Defaults to ./gg_workspace in the current directory.")
+    parser.add_argument(
+        "--root", default=None, help="Artifact store root. Defaults to ./gg_workspace in the current directory."
+    )
     parser.add_argument("--port", type=int, default=8432, help="Port to bind the GradGlass dashboard server.")
     parser.add_argument(
-        "--open-browser",
-        action="store_true",
-        help="Open the dashboard URL in a browser after the server starts.",
+        "--open-browser", action="store_true", help="Open the dashboard URL in a browser after the server starts."
     )
     args = parser.parse_args()
 

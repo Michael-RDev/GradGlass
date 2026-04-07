@@ -1,18 +1,8 @@
 from __future__ import annotations
 import json
 import math
-from pathlib import Path
-from typing import Any
 import numpy as np
-from gradglass.analysis.registry import (
-    TestCategory,
-    TestContext,
-    TestRegistry,
-    TestResult,
-    TestSeverity,
-    TestStatus,
-    test,
-)
+from gradglass.analysis.registry import TestCategory, TestResult, TestSeverity, TestStatus, test
 
 
 @test(
@@ -416,7 +406,7 @@ def test_layer_name_uniqueness(ctx):
             severity=TestSeverity.MEDIUM,
             category=TestCategory.MODEL,
         )
-    ids = [l["id"] for l in ctx.architecture.get("layers", [])]
+    ids = [layer["id"] for layer in ctx.architecture.get("layers", [])]
     dupes = [i for i in set(ids) if ids.count(i) > 1]
     if dupes:
         return TestResult(
@@ -2618,7 +2608,6 @@ def test_dead_channels(ctx):
         layer = stat.get("layer", "")
         sparsity = stat.get("sparsity", 0)
         mean = stat.get("mean", None)
-        var = stat.get("var", None)
         # A "dead channel" has near-zero mean, near-zero variance, and high sparsity
         if sparsity is not None and sparsity > 0.98 and mean is not None and abs(mean) < 1e-4:
             dead_channels.append(
@@ -2835,7 +2824,6 @@ def test_activation_pattern_stability(ctx):
         if not early_vars or not late_vars:
             continue
 
-        early_mean = float(np.mean(early_vars))
         late_mean = float(np.mean(late_vars))
         late_std = float(np.std(late_vars))
 
@@ -2988,7 +2976,7 @@ def test_epoch_loss_improvement(ctx):
                 }
             )
 
-    epoch_summary = [{"epoch": e, "mean_loss": round(l, 6)} for e, l in epoch_means]
+    epoch_summary = [{"epoch": epoch, "mean_loss": round(mean_loss, 6)} for epoch, mean_loss in epoch_means]
 
     if regressions:
         return TestResult(

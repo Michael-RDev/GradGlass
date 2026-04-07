@@ -26,11 +26,7 @@ def _coerce_bool(value: Any) -> Optional[bool]:
 
 
 def resolve_open_browser_preference(
-    explicit: Optional[bool],
-    option_value: Any = None,
-    *,
-    env_var: str = "GRADGLASS_OPEN_BROWSER",
-    default: bool = True,
+    explicit: Optional[bool], option_value: Any = None, *, env_var: str = "GRADGLASS_OPEN_BROWSER", default: bool = True
 ) -> bool:
     explicit_value = _coerce_bool(explicit)
     if explicit_value is not None:
@@ -74,8 +70,8 @@ def open_url_detached(url: str, *, force_reload: bool = False) -> bool:
         "start_new_session": True,
     }
     if sys.platform.startswith("win"):
-        kwargs["creationflags"] = (
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "DETACHED_PROCESS", 0
         )
 
     try:

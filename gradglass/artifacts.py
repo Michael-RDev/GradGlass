@@ -73,9 +73,7 @@ def _discover_entrypoint_path() -> Optional[Path]:
 
 
 def resolve_default_root(
-    entrypoint: os.PathLike[str] | str | None = None,
-    *,
-    fallback_dir: os.PathLike[str] | str | None = None,
+    entrypoint: os.PathLike[str] | str | None = None, *, fallback_dir: os.PathLike[str] | str | None = None
 ) -> Path:
     override = os.environ.get("GRADGLASS_ROOT")
     if override:
@@ -214,11 +212,13 @@ class ArtifactStore:
         if pkl_path.exists():
             try:
                 import joblib
-                return {'model': joblib.load(str(pkl_path))}
+
+                return {"model": joblib.load(str(pkl_path))}
             except ImportError:
                 import pickle
-                with open(pkl_path, 'rb') as fh:
-                    return {'model': pickle.load(fh)}
+
+                with open(pkl_path, "rb") as fh:
+                    return {"model": pickle.load(fh)}
         raise FileNotFoundError(f"Checkpoint not found at step {step} in {ckpt_dir}")
 
     def get_gradient_summaries(self, run_id):

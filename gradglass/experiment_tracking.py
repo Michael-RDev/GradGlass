@@ -210,7 +210,9 @@ class BaseExperimentAdapter:
         if start_ts is None:
             return 0.0
 
-        resolved_status = status or _normalize_run_status(self.runtime_state.get("status") or self.metadata.get("status"))
+        resolved_status = status or _normalize_run_status(
+            self.runtime_state.get("status") or self.metadata.get("status")
+        )
         if resolved_status in TERMINAL_STATUSES:
             end_ts = _safe_float(self.runtime_state.get("last_event_ts"))
             if end_ts is None:

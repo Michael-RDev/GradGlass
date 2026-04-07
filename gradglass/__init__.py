@@ -5,6 +5,7 @@ from gradglass.analysis.leakage import LeakageDetector, LeakageReport as DataLea
 from gradglass._version import __version__
 
 __all__ = [
+    "__version__",
     "gg",
     "test",
     "TestContext",

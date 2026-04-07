@@ -32,10 +32,7 @@ def _read_json(url: str):
 
 def test_dashboard_showcase_example_populates_dashboard_endpoints(tmp_path):
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
     if probe.returncode != 0:
         pytest.skip("Torch is not importable in this environment; skipping dashboard showcase example test.")
@@ -89,10 +86,7 @@ def test_dashboard_showcase_example_populates_dashboard_endpoints(tmp_path):
 
 def test_dashboard_showcase_main_prints_workspace_matching_server_root(tmp_path, monkeypatch, capsys):
     probe = subprocess.run(
-        [sys.executable, "-c", "import torch"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+        [sys.executable, "-c", "import torch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
     )
     if probe.returncode != 0:
         pytest.skip("Torch is not importable in this environment; skipping dashboard showcase example test.")

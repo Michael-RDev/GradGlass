@@ -30,15 +30,7 @@ def _write_runtime_state(store: ArtifactStore, run_id: str, payload: dict) -> No
 
 def test_stop_gradglass_monitor_by_run_id_updates_runtime_state(tmp_path, monkeypatch):
     store = ArtifactStore(root=tmp_path)
-    _write_runtime_state(
-        store,
-        "run-1",
-        {
-            "monitor_enabled": True,
-            "monitor_port": 8432,
-            "monitor_pid": 3210,
-        },
-    )
+    _write_runtime_state(store, "run-1", {"monitor_enabled": True, "monitor_port": 8432, "monitor_pid": 3210})
 
     terminated: list[int] = []
     monkeypatch.setattr("gradglass.monitor_control._is_pid_alive", lambda pid: True)
@@ -60,15 +52,7 @@ def test_stop_gradglass_monitor_by_run_id_updates_runtime_state(tmp_path, monkey
 
 def test_stop_gradglass_monitor_marks_stale_pid_without_failing(tmp_path, monkeypatch):
     store = ArtifactStore(root=tmp_path)
-    _write_runtime_state(
-        store,
-        "run-stale",
-        {
-            "monitor_enabled": True,
-            "monitor_port": 8432,
-            "monitor_pid": 9999,
-        },
-    )
+    _write_runtime_state(store, "run-stale", {"monitor_enabled": True, "monitor_port": 8432, "monitor_pid": 9999})
 
     monkeypatch.setattr("gradglass.monitor_control._is_pid_alive", lambda pid: False)
 
@@ -181,8 +165,7 @@ def test_stop_gradglass_monitor_by_port_uses_verified_gradglass_process(tmp_path
 def test_stop_gradglass_monitor_by_port_refuses_non_gradglass_process(tmp_path, monkeypatch):
     store = ArtifactStore(root=tmp_path)
     monkeypatch.setattr(
-        "gradglass.monitor_control.find_process_by_port",
-        lambda port: (5555, "python -m http.server 8432"),
+        "gradglass.monitor_control.find_process_by_port", lambda port: (5555, "python -m http.server 8432")
     )
 
     results = stop_gradglass_monitor(store, port=8432)
@@ -246,7 +229,11 @@ def test_cli_stop_by_run_id_prints_result(monkeypatch, tmp_path, capsys):
         recorded["run_id"] = run_id
         recorded["port"] = port
         recorded["stop_all"] = stop_all
-        return [MonitorStopResult(status="stopped", message="Stopped GradGlass monitor for run 'run-123' on port 8432 (pid 4321).")]
+        return [
+            MonitorStopResult(
+                status="stopped", message="Stopped GradGlass monitor for run 'run-123' on port 8432 (pid 4321)."
+            )
+        ]
 
     monkeypatch.setattr("gradglass.monitor_control.stop_gradglass_monitor", fake_stop)
     monkeypatch.setattr(sys, "argv", ["gradglass", "stop", "run-123"])
@@ -348,7 +335,9 @@ def test_start_server_blocking_prints_success_after_server_starts(tmp_path, monk
     monkeypatch.setattr("gradglass.server.uvicorn.Server", FakeServer)
     monkeypatch.setattr(
         "gradglass.server.schedule_url_open_detached",
-        lambda url, delay_s=0.0, force_reload=False: browser_calls.append((url, delay_s, force_reload)) or threading.Thread(),
+        lambda url, delay_s=0.0, force_reload=False: (
+            browser_calls.append((url, delay_s, force_reload)) or threading.Thread()
+        ),
     )
 
     start_server_blocking(app, port=8432, open_browser=True)

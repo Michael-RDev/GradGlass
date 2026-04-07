@@ -55,12 +55,7 @@ class TinyVisionNet(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(2),
         )
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(16 * 4 * 4, 32),
-            nn.ReLU(),
-            nn.Linear(32, 3),
-        )
+        self.classifier = nn.Sequential(nn.Flatten(), nn.Linear(16 * 4 * 4, 32), nn.ReLU(), nn.Linear(32, 3))
 
     def forward(self, x):
         return self.classifier(self.features(x))

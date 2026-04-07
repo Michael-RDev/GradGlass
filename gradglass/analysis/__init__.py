@@ -4,13 +4,13 @@ from gradglass.analysis.report import PostRunReport
 from gradglass.analysis.data_monitor import DatasetMonitorBuilder, DatasetMonitorConfig, DatasetMonitorReport
 
 __all__ = [
-    'TestRegistry',
-    'test',
-    'TestContext',
-    'TestResult',
-    'AnalysisRunner',
-    'PostRunReport',
-    'DatasetMonitorBuilder',
-    'DatasetMonitorConfig',
-    'DatasetMonitorReport',
+    "TestRegistry",
+    "test",
+    "TestContext",
+    "TestResult",
+    "AnalysisRunner",
+    "PostRunReport",
+    "DatasetMonitorBuilder",
+    "DatasetMonitorConfig",
+    "DatasetMonitorReport",
 ]

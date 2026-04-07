@@ -104,7 +104,7 @@ def main():
             runs.sort(key=lambda r: r.get("start_time", ""), reverse=True)
             run = gg.get_run(runs[0]["run_id"])
         tests = args.tests if args.tests else "all"
-        report = run.analyze(tests=tests)
+        run.analyze(tests=tests)
         if args.open:
             run.open()
     else:

@@ -12,10 +12,7 @@ def make_toy_loader(batch_size=32):
     torch.manual_seed(7)
     features = torch.randn(256, 4)
     decision = (
-        1.8 * features[:, 0]
-        - 1.2 * features[:, 1]
-        + 0.7 * features[:, 2]
-        + 0.5 * features[:, 0] * features[:, 3]
+        1.8 * features[:, 0] - 1.2 * features[:, 1] + 0.7 * features[:, 2] + 0.5 * features[:, 0] * features[:, 3]
     )
     labels = (decision > 0).long()
     dataset = TensorDataset(features, labels)
@@ -25,11 +22,7 @@ def make_toy_loader(batch_size=32):
 class TinyClassifier(nn.Module):
     def __init__(self):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(4, 16),
-            nn.ReLU(),
-            nn.Linear(16, 2),
-        )
+        self.layers = nn.Sequential(nn.Linear(4, 16), nn.ReLU(), nn.Linear(16, 2))
 
     def forward(self, x):
         return self.layers(x)
@@ -46,13 +39,7 @@ def main():
     run = gg.run(name="pytorch_core_tracking_minimal", task="classification")
     run.checkpoint_every(4)
     run.watch(
-        model,
-        optimizer=optimizer,
-        activations="auto",
-        gradients="summary",
-        saliency="auto",
-        every=4,
-        probe_examples=16,
+        model, optimizer=optimizer, activations="auto", gradients="summary", saliency="auto", every=4, probe_examples=16
     )
 
     print(f"Started run: {run.run_id}")

@@ -6,7 +6,9 @@ from typing import Any, Optional
 import numpy as np
 
 
-_LAYER_SUFFIX_RE = re.compile(r"\.(weight|bias|running_mean|running_var|num_batches_tracked|gamma|beta)$", re.IGNORECASE)
+_LAYER_SUFFIX_RE = re.compile(
+    r"\.(weight|bias|running_mean|running_var|num_batches_tracked|gamma|beta)$", re.IGNORECASE
+)
 
 
 def normalize_layer_id(layer_id: str) -> str:
@@ -49,7 +51,9 @@ def _warning_labels(stats: dict[str, Any]) -> list[str]:
     return warnings
 
 
-def _summarize_layer_array(layer: str, values: np.ndarray, *, shape: Optional[list[int]] = None, kind: str) -> dict[str, Any]:
+def _summarize_layer_array(
+    layer: str, values: np.ndarray, *, shape: Optional[list[int]] = None, kind: str
+) -> dict[str, Any]:
     arr = np.asarray(values)
     stats = _array_stats(arr)
     return {
@@ -93,10 +97,7 @@ def build_distributions_payload(store, run_id: str, step: Optional[int] = None) 
                 continue
             arr = np.asarray(arrays[key])
             entry = _summarize_layer_array(
-                layer_meta.get("layer", key),
-                arr,
-                shape=layer_meta.get("shape") or list(arr.shape),
-                kind="activations",
+                layer_meta.get("layer", key), arr, shape=layer_meta.get("shape") or list(arr.shape), kind="activations"
             )
             entry["probe_step"] = probe_step
             entry["sample_count"] = int(arr.shape[0]) if arr.ndim > 0 else 0
@@ -198,24 +199,14 @@ def build_saliency_payload(store, run_id: str, step: Optional[int] = None) -> di
                     "saliency": _normalize_vision_saliency(np.asarray(saliency)[index]),
                 }
             )
-        return {
-            "run_id": run_id,
-            "step": meta.get("step"),
-            "available": True,
-            "modality": "vision",
-            "samples": samples,
-        }
+        return {"run_id": run_id, "step": meta.get("step"), "available": True, "modality": "vision", "samples": samples}
 
     if modality == "structured":
         saliency_arr = np.asarray(saliency, dtype=np.float64)
         feature_scores = np.mean(np.abs(saliency_arr), axis=0)
         top_indices = np.argsort(feature_scores)[::-1][: min(16, feature_scores.shape[0])]
         feature_importance = [
-            {
-                "index": int(idx),
-                "feature": f"Feature {int(idx) + 1}",
-                "score": float(feature_scores[idx]),
-            }
+            {"index": int(idx), "feature": f"Feature {int(idx) + 1}", "score": float(feature_scores[idx])}
             for idx in top_indices
         ]
         sample_count = min(int(input_arr.shape[0]), int(saliency_arr.shape[0]), 6)
@@ -273,7 +264,7 @@ def _pca_2d(matrix: np.ndarray) -> tuple[np.ndarray, list[float]]:
     projection = centered @ vt[:components].T
     if components == 1:
         projection = np.column_stack([projection[:, 0], np.zeros(centered.shape[0])])
-    explained = (singular_values ** 2) / max(centered.shape[0] - 1, 1)
+    explained = (singular_values**2) / max(centered.shape[0] - 1, 1)
     total = float(np.sum(explained))
     if total <= 0:
         ratios = [0.0, 0.0]
@@ -289,11 +280,7 @@ def build_embeddings_payload(store, run_id: str, step: Optional[int] = None) -> 
     try:
         probe_bundle = store.load_probe_bundle(run_id, step=step)
     except FileNotFoundError:
-        return {
-            "run_id": run_id,
-            "available": False,
-            "reason": "No probe activations were captured for this run.",
-        }
+        return {"run_id": run_id, "available": False, "reason": "No probe activations were captured for this run."}
 
     meta = probe_bundle["meta"]
     arrays = probe_bundle["arrays"]

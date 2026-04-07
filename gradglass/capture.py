@@ -2,8 +2,6 @@ from __future__ import annotations
 import json
 import time
 import threading
-from pathlib import Path
-from typing import Any, Optional
 from queue import Queue
 import numpy as np
 
@@ -112,34 +110,72 @@ class CaptureEngine:
             add_edge(top_level[i], top_level[i + 1])
 
         layers = list(raw.values())
-        return {
-            "layers": layers,
-            "edges": edges,
-            "root_type": root_type,
-            "top_level": top_level,
-        }
+        return {"layers": layers, "edges": edges, "root_type": root_type, "top_level": top_level}
 
     # ── category inference ────────────────────────────────────────────────────
     @staticmethod
     def _infer_category(layer_type: str) -> str:
         lt = layer_type.lower()
-        if any(k in lt for k in ("conv", "linear", "embedding", "attention", "transformer",
-                                  "lstm", "gru", "rnn", "encoder", "decoder", "res2net",
-                                  "multihead", "selfattn", "crossattn", "pool", "ecapa",
-                                  "speaker", "diarization", "sequential", "modulelist",
-                                  "moduledict", "feedforward", "mlp", "head")):
+        if any(
+            k in lt
+            for k in (
+                "conv",
+                "linear",
+                "embedding",
+                "attention",
+                "transformer",
+                "lstm",
+                "gru",
+                "rnn",
+                "encoder",
+                "decoder",
+                "res2net",
+                "multihead",
+                "selfattn",
+                "crossattn",
+                "pool",
+                "ecapa",
+                "speaker",
+                "diarization",
+                "sequential",
+                "modulelist",
+                "moduledict",
+                "feedforward",
+                "mlp",
+                "head",
+            )
+        ):
             return "model"
-        if any(k in lt for k in ("batchnorm", "layernorm", "groupnorm", "instancenorm",
-                                  "dropout", "relu", "gelu", "silu", "activation",
-                                  "softmax", "sigmoid", "tanh", "norm")):
+        if any(
+            k in lt
+            for k in (
+                "batchnorm",
+                "layernorm",
+                "groupnorm",
+                "instancenorm",
+                "dropout",
+                "relu",
+                "gelu",
+                "silu",
+                "activation",
+                "softmax",
+                "sigmoid",
+                "tanh",
+                "norm",
+            )
+        ):
             return "model"
-        if any(k in lt for k in ("loss", "criterion", "crossentropy", "bce", "mse",
-                                  "nll", "kl", "contrastive", "triplet", "focal")):
+        if any(
+            k in lt
+            for k in ("loss", "criterion", "crossentropy", "bce", "mse", "nll", "kl", "contrastive", "triplet", "focal")
+        ):
             return "training"
         if any(k in lt for k in ("metric", "accuracy", "f1", "auc", "eval", "score")):
             return "eval"
-        if any(k in lt for k in ("dataset", "dataloader", "transform", "augment",
-                                  "preprocess", "feature", "tokenizer", "collate")):
+        if any(
+            k in lt
+            for k in ("dataset", "dataloader", "transform", "augment", "preprocess", "feature", "tokenizer", "collate")
+        ):
             return "data"
         return "model"
 
@@ -496,8 +532,7 @@ class CaptureEngine:
                 bundle["confidence_array"] = confidence_array
                 bundle["logits_array"] = logits_array
                 bundle["activation_arrays"] = {
-                    layer: np.asarray(values)
-                    for layer, values in self.latest_probe_activations.items()
+                    layer: np.asarray(values) for layer, values in self.latest_probe_activations.items()
                 }
 
                 saliency_disabled = str(self.saliency_mode).lower() == "off"
@@ -508,7 +543,9 @@ class CaptureEngine:
                 elif not primary_input.is_floating_point():
                     bundle["saliency_reason"] = "Saliency capture is unavailable for non-floating-point inputs."
                 elif primary_input.ndim not in (2, 4):
-                    bundle["saliency_reason"] = "Saliency capture currently supports structured vectors and vision tensors."
+                    bundle["saliency_reason"] = (
+                        "Saliency capture currently supports structured vectors and vision tensors."
+                    )
                 elif not torch.is_tensor(outputs):
                     bundle["saliency_reason"] = "Model outputs could not be converted into a saliency target."
                 else:
@@ -528,7 +565,9 @@ class CaptureEngine:
                             indices = flat_outputs.argmax(dim=1, keepdim=True)
                             selected = flat_outputs.gather(1, indices).sum()
                             bundle["prediction_array"] = indices.detach().cpu().numpy().reshape(-1)
-                            bundle["confidence_array"] = self._confidence_from_scores(flat_outputs.detach().cpu().numpy())
+                            bundle["confidence_array"] = self._confidence_from_scores(
+                                flat_outputs.detach().cpu().numpy()
+                            )
                             bundle["logits_array"] = flat_outputs.detach().cpu().numpy()
                         else:
                             selected = outputs.sum()
@@ -542,8 +581,7 @@ class CaptureEngine:
                         bundle["saliency_kind"] = "vision" if grad_input.ndim == 4 else "structured"
                         bundle["saliency_reason"] = None
                         bundle["activation_arrays"] = {
-                            layer: np.asarray(values)
-                            for layer, values in self.latest_probe_activations.items()
+                            layer: np.asarray(values) for layer, values in self.latest_probe_activations.items()
                         }
                         try:
                             self.model.zero_grad(set_to_none=True)
@@ -651,11 +689,15 @@ class CaptureEngine:
         meta = {
             "step": step,
             "timestamp": float(timestamp),
-            "probe_examples": int(tensors.get("input").shape[0]) if isinstance(tensors.get("input"), np.ndarray) and tensors["input"].ndim > 0 else 0,
+            "probe_examples": int(tensors.get("input").shape[0])
+            if isinstance(tensors.get("input"), np.ndarray) and tensors["input"].ndim > 0
+            else 0,
             "input_modality": input_modality,
             "input_shape": list(tensors["input"].shape) if isinstance(tensors.get("input"), np.ndarray) else None,
             "target_shape": list(tensors["targets"].shape) if isinstance(tensors.get("targets"), np.ndarray) else None,
-            "prediction_shape": list(tensors["predictions"].shape) if isinstance(tensors.get("predictions"), np.ndarray) else None,
+            "prediction_shape": list(tensors["predictions"].shape)
+            if isinstance(tensors.get("predictions"), np.ndarray)
+            else None,
             "activation_layers": activation_meta,
             "saliency": {
                 "available": saliency_array is not None,
@@ -821,7 +863,9 @@ class CaptureEngine:
                         record["y_pred"] = y_pred_np.tolist()
                     else:
                         record["y_pred"] = y_pred_np[:256].tolist()
-                    record["prediction_type"] = "numeric_array" if getattr(y_pred_np, "ndim", 0) > 1 else "numeric_vector"
+                    record["prediction_type"] = (
+                        "numeric_array" if getattr(y_pred_np, "ndim", 0) > 1 else "numeric_vector"
+                    )
             if loss is not None:
                 loss_np = self._to_numpy(loss)
                 record["loss"] = float(loss) if np.isscalar(loss) else float(loss_np)
@@ -848,10 +892,7 @@ class CaptureEngine:
             confidence_array = probe_bundle.get("confidence_array")
             logits_array = probe_bundle.get("logits_array")
             activation_arrays = probe_bundle.get("activation_arrays") or {}
-            self.cached_probe_activations = {
-                layer: np.asarray(values)
-                for layer, values in activation_arrays.items()
-            }
+            self.cached_probe_activations = {layer: np.asarray(values) for layer, values in activation_arrays.items()}
 
             if prediction_array is None and y_pred_np is not None:
                 y_pred_probe = y_pred_np[: self.probe_examples] if getattr(y_pred_np, "ndim", 0) > 0 else y_pred_np

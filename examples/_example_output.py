@@ -23,11 +23,7 @@ def serve_command_for_workspace(workspace_root: Path | str, *, port: int = 8432)
 
 
 def print_dashboard_next_steps(
-    workspace_root: Path | str,
-    *,
-    port: int = 8432,
-    live_monitor: bool = False,
-    label: str = "Workspace",
+    workspace_root: Path | str, *, port: int = 8432, live_monitor: bool = False, label: str = "Workspace"
 ) -> None:
     root = Path(workspace_root).resolve()
     print(f"{label}: {root}")
