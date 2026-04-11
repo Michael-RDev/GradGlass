@@ -33,6 +33,14 @@ happened, not just whether the loss went down.
 
 ## Installation
 
+Install gradglass from PyPI:
+
+```bash
+pip install gradglass
+```
+
+## Contributing
+
 GradGlass requires Python 3.9+.
 
 ```bash
